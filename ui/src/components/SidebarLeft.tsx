@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { VaultFile, MemoryFact, DirectiveItem, VitalMetric, VitalsProvider } from '../types';
+import type { VaultFile, MemoryFact, MemoryCandidate, DirectiveItem, VitalMetric, VitalsProvider } from '../types';
 
 function LogoLauncher({ onOpenChat, onOpenProviders, onOpenSync, onOpenActivity, onOpenAppSettings }: { onOpenChat: () => void; onOpenProviders: () => void; onOpenSync: () => void; onOpenActivity: () => void; onOpenAppSettings: () => void }) {
   const [open, setOpen] = useState(false);
@@ -223,7 +223,7 @@ function timeAgo(iso: string): string {
   return `${days}d`;
 }
 
-export function SidebarLeft({ vaultFiles, facts, directives, vitals, vitalsProvider, vitalsError, vitalsCached, vitalsUpdatedAt, onVitalsProviderChange, onDeleteMemory, onOpenChat, onOpenProviders, onOpenSync, onOpenActivity, onOpenAppSettings }: {
+export function SidebarLeft({ vaultFiles, facts, directives, vitals, vitalsProvider, vitalsError, vitalsCached, vitalsUpdatedAt, onVitalsProviderChange, onDeleteMemory, memoryCandidates = [], onReviewCandidate, onOpenChat, onOpenProviders, onOpenSync, onOpenActivity, onOpenAppSettings }: {
   vaultFiles: VaultFile[];
   facts: MemoryFact[];
   directives: DirectiveItem[];
@@ -234,6 +234,8 @@ export function SidebarLeft({ vaultFiles, facts, directives, vitals, vitalsProvi
   vitalsUpdatedAt?: string;
   onVitalsProviderChange: (provider: VitalsProvider) => void;
   onDeleteMemory?: (id: string) => void;
+  memoryCandidates?: MemoryCandidate[];
+  onReviewCandidate?: (id: string, decision: 'approved' | 'rejected') => void;
   onOpenChat: () => void;
   onOpenProviders: () => void;
   onOpenSync: () => void;
@@ -387,6 +389,39 @@ export function SidebarLeft({ vaultFiles, facts, directives, vitals, vitalsProvi
               </div>
             ))}
           </div>
+        )}
+        {memoryCandidates.length > 0 && onReviewCandidate && (
+          <>
+            <div className="separator" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span className="label-sm" title="Propuestas de Amatista tras analizar tus conversaciones — nada se guarda sin tu visto bueno">
+                POR REVISAR · {memoryCandidates.length}
+              </span>
+            </div>
+            <div style={{ maxHeight: 140, overflow: 'auto' }}>
+              {memoryCandidates.map((c, i) => (
+                <div key={c.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '4px 0', borderBottom: i < memoryCandidates.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
+                  <span style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--text-secondary)', flex: 1 }} title={c.category}>
+                    {c.content}
+                  </span>
+                  <button
+                    onClick={() => onReviewCandidate(c.id, 'approved')}
+                    title="Guardar en memoria"
+                    style={{ background: 'none', border: 'none', color: 'var(--accent-bright)', cursor: 'pointer', padding: '0 2px', fontSize: 12, lineHeight: 1.4, flexShrink: 0 }}
+                  >
+                    ✓
+                  </button>
+                  <button
+                    onClick={() => onReviewCandidate(c.id, 'rejected')}
+                    title="Descartar propuesta"
+                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0 2px', fontSize: 12, lineHeight: 1.4, flexShrink: 0 }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
 

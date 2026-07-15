@@ -98,14 +98,27 @@ export class OllamaProvider implements Provider {
       body.tools = ollamaTools;
     }
 
+    // Timeout de inactividad: aborta si Ollama no produce NADA (ni conexión ni
+    // chunks) durante la ventana. Cada chunk recibido rearma el temporizador, así
+    // una respuesta larga pero viva nunca se corta.
+    const idleMs = envNum('OLLAMA_TIMEOUT_MS', 120_000);
+    const controller = new AbortController();
+    let idleTimer = setTimeout(() => controller.abort(), idleMs);
+    const rearm = () => { clearTimeout(idleTimer); idleTimer = setTimeout(() => controller.abort(), idleMs); };
+
     let response: Response;
     try {
       response = await fetch(`${this.baseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
-    } catch {
+    } catch (err) {
+      clearTimeout(idleTimer);
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error(`Ollama no respondió en ${Math.round(idleMs / 1000)} segundos. El modelo puede estar cargando o colgado; reintenta o revisa 'ollama ps'.`);
+      }
       throw new Error(
         `No se pudo conectar con Ollama en ${this.baseUrl}. ¿Está corriendo? ` +
         `Abre la app de Ollama o ejecuta 'ollama serve'.`
@@ -124,9 +137,20 @@ export class OllamaProvider implements Provider {
     let buffer = '';
     let pendingToolCalls: OllamaToolCall[] = [];
     let hasToolCalls = false;
+    try {
     while (true) {
-      const { done, value } = await reader.read();
+      let done: boolean, value: Uint8Array | undefined;
+      try {
+        ({ done, value } = await reader.read());
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          throw new Error(`Ollama dejó de responder a mitad de la generación (${Math.round(idleMs / 1000)}s sin datos). Reintenta el mensaje.`);
+        }
+        throw err;
+      }
       if (done) break;
+      rearm();
+      if (!value) continue;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop() || '';
@@ -170,6 +194,9 @@ export class OllamaProvider implements Provider {
           // skip malformed lines
         }
       }
+    }
+    } finally {
+      clearTimeout(idleTimer);
     }
   }
 }

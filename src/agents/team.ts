@@ -1,9 +1,15 @@
 import { Tool, ToolRegistry } from '../tools/registry.js';
 import { registerAllTools } from '../tools/index.js';
 import { Agent, ConfirmationGate, SafetyRuleResolver, ToolEventCallback } from '../agent/core.js';
-import { Provider } from '../provider/types.js';
+import { Provider, Message } from '../provider/types.js';
 import { audit } from '../config/audit.js';
 import { SUBAGENT_PROFILES, ESCARLATA_DIRECT_TOOLS, getProfile, buildSubagentPrompt } from './profiles.js';
+
+/** Propuesta de memoria extraída por Amatista; queda pendiente de revisión del usuario. */
+export interface MemoryCandidate {
+  content: string;
+  category: string;
+}
 
 export interface TeamOptions {
   /** Getter so subagents always use the CURRENT provider (model can be switched at runtime). */
@@ -14,6 +20,32 @@ export interface TeamOptions {
   onToolEvent?: ToolEventCallback | null;
   /** The same centrally configured policy used by Escarlata must govern every gem. */
   getSafetyRuleResolver?: () => SafetyRuleResolver | null;
+  /** Recibe los candidatos MEMORIA del análisis en background para persistirlos y revisarlos. */
+  onMemoryCandidates?: (candidates: MemoryCandidate[]) => void;
+}
+
+/** Extrae las líneas "MEMORIA: [categoria] hecho" del informe de Amatista. */
+export function parseMemoryCandidates(report: string): MemoryCandidate[] {
+  const candidates: MemoryCandidate[] = [];
+  for (const match of report.matchAll(/^\s*MEMORIA:\s*(?:\[([^\]]*)\]\s*)?(.+)$/gim)) {
+    const content = match[2].trim();
+    if (content) candidates.push({ content, category: (match[1] || 'general').trim().toLowerCase() });
+  }
+  return candidates;
+}
+
+/** Flatten agent history into a USUARIO/ESCARLATA transcript for analysis. */
+export function historyToTranscript(history: Message[]): string {
+  return history
+    .map(m => {
+      const text = typeof m.content === 'string'
+        ? m.content
+        : m.content.map(b => (b.type === 'text' && 'text' in b) ? b.text : '').filter(Boolean).join('\n');
+      if (!text.trim() || m.role === 'system') return '';
+      return `${m.role === 'user' ? 'USUARIO' : 'ESCARLATA'}: ${text.trim()}`;
+    })
+    .filter(Boolean)
+    .join('\n---\n');
 }
 
 function buildProfileRegistry(master: ToolRegistry, toolNames: string[]): ToolRegistry {
@@ -175,12 +207,16 @@ export function createTeam(opts: TeamOptions): Team {
         'Analiza la conversación actual y propón con líneas MEMORIA únicamente hechos duraderos nuevos y aprendizajes de comportamiento para Escarlata (categoría "escarlata"). No llames remember; las líneas quedarán como candidatas para revisión. Si no hay nada nuevo, no emitas líneas MEMORIA.',
         context
       )
-        .then(report => audit({
-          timestamp: new Date().toISOString(),
-          type: 'tool_run',
-          detail: 'Amatista generó candidatos de memoria para revisión',
-          metadata: { candidateCount: (report.match(/^\s*MEMORIA:/gim) || []).length },
-        }))
+        .then(async report => {
+          const candidates = parseMemoryCandidates(report);
+          if (candidates.length && opts.onMemoryCandidates) opts.onMemoryCandidates(candidates);
+          await audit({
+            timestamp: new Date().toISOString(),
+            type: 'tool_run',
+            detail: 'Amatista generó candidatos de memoria para revisión',
+            metadata: { candidateCount: candidates.length },
+          });
+        })
         .catch(err => {
           console.error('[amatista] background analysis failed:', err instanceof Error ? err.message : err);
         })

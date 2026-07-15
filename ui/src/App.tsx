@@ -13,7 +13,7 @@ import { PerspectiveGrid } from './components/PerspectiveGrid';
 import { TerminalOverlay, TOOL_NOTICE_MS } from './components/TerminalOverlay';
 import { ChatPage } from './components/ChatPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import type { Message, ToolDef, MemoryFact, Notice, EscarlataConfig, WsMessage, VaultFile, DirectiveItem, Conversation, VitalMetric, VitalsProvider, VitalsByProvider, UsageStatsDay, SystemStatus, LinkStatus, OllamaModelInfo, LocalModelFile, ChatFolderState, AuthMethod, ProviderAuthStatus, DesktopPreferences } from './types';
+import type { Message, ToolDef, MemoryFact, MemoryCandidate, Notice, EscarlataConfig, WsMessage, VaultFile, DirectiveItem, Conversation, VitalMetric, VitalsProvider, VitalsByProvider, UsageStatsDay, SystemStatus, LinkStatus, OllamaModelInfo, LocalModelFile, ChatFolderState, AuthMethod, ProviderAuthStatus, DesktopPreferences } from './types';
 import type { ToolActivity } from './components/TerminalOverlay';
 import { ModelConfigPanel } from './components/ModelConfigPanel';
 import { SyncSettings } from './components/SyncSettings';
@@ -61,6 +61,7 @@ export default function App() {
   const [tools, setTools] = useState<ToolDef[]>([]);
   const [config, setConfig] = useState<EscarlataConfig | null>(null);
   const [facts, setFacts] = useState<MemoryFact[]>([]);
+  const [memoryCandidates, setMemoryCandidates] = useState<MemoryCandidate[]>([]);
   const [vaultFiles, setVaultFiles] = useState<VaultFile[]>([]);
   const [directives, setDirectives] = useState<DirectiveItem[]>([]);
   const [vitalsProvider, setVitalsProvider] = useState<VitalsProvider>(() => localStorage.getItem('escarlata_vitals_provider') === 'openai' ? 'openai' : 'anthropic');
@@ -164,6 +165,7 @@ export default function App() {
       if (msg.tools) setTools(msg.tools as ToolDef[]);
       if (msg.config) setConfig(msg.config as EscarlataConfig);
       if (msg.facts) setFacts(msg.facts as MemoryFact[]);
+      if (msg.memoryCandidates) setMemoryCandidates(msg.memoryCandidates as MemoryCandidate[]);
       if (msg.vaultFiles) setVaultFiles(msg.vaultFiles as VaultFile[]);
       if (msg.directives) setDirectives(msg.directives as DirectiveItem[]);
       if (msg.vitalsByProvider) setVitalsByProvider(msg.vitalsByProvider as VitalsByProvider);
@@ -262,6 +264,9 @@ export default function App() {
     confirm_result: () => setPendingConfirm(null),
     memories: (msg: WsMessage) => {
       if (msg.facts) setFacts(msg.facts as MemoryFact[]);
+    },
+    memory_candidates: (msg: WsMessage) => {
+      if (msg.candidates) setMemoryCandidates(msg.candidates as MemoryCandidate[]);
     },
     error: (msg: WsMessage) => {
       setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: 'assistant', content: `⚠ Error: ${msg.message}`, timestamp: new Date().toISOString() }]);
@@ -665,6 +670,8 @@ export default function App() {
             localStorage.setItem('escarlata_vitals_provider', provider);
           }}
           onDeleteMemory={(id) => send({ type: 'delete_memory', id })}
+          memoryCandidates={memoryCandidates}
+          onReviewCandidate={(id, decision) => send({ type: 'review_memory_candidate', id, decision })}
           onOpenChat={() => setChatPageOpen(true)}
           onOpenProviders={() => setShowModelConfig(true)}
           onOpenSync={() => setShowSyncSettings(true)}

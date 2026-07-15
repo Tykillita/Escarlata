@@ -8,6 +8,7 @@ import type { Message } from '../../../../src/provider/types.js';
 export interface LocalProfile { id:string; displayName:string; deviceId:string; firebaseUid?:string|null; lastSyncAt?:string|null }
 export interface ConversationSummary { id:string; title:string; createdAt:string; updatedAt:string; messageCount:number }
 export interface SyncConversation extends ConversationSummary { messages:{id:string;role:string;content:unknown;createdAt:string;sequence:number}[] }
+export interface MemoryCandidateRow { id:string; content:string; category:string; sourceConversationId?:string|null; createdAt:string }
 type Row=Record<string, unknown>;
 
 export class LocalStore {
@@ -44,6 +45,22 @@ export class LocalStore {
   deleteConversation(id:string):void{this.db.run('DELETE FROM messages WHERE conversation_id=?',[id]);this.db.run('DELETE FROM conversations WHERE id=?',[id]);this.flush();}
   renameConversation(id:string,title:string):void{this.db.run('UPDATE conversations SET title=?,updated_at=? WHERE id=?',[title.slice(0,500),new Date().toISOString(),id]);this.flush();}
   syncConversations():SyncConversation[]{return this.listConversations().map(conversation=>({...conversation,messages:this.rows('SELECT id,role,content_json AS contentJson,created_at AS createdAt,sequence FROM messages WHERE conversation_id=? ORDER BY sequence',[conversation.id]).map(row=>({id:String(row.id),role:String(row.role),content:JSON.parse(String(row.contentJson)),createdAt:String(row.createdAt),sequence:Number(row.sequence)}))}));}
+  /** Propuestas de Amatista pendientes de revisión. Devuelve cuántas se insertaron (deduplica por contenido pendiente). */
+  addMemoryCandidates(candidates:{content:string;category:string}[],conversationId?:string):number{
+    const now=new Date().toISOString();let inserted=0;
+    for(const candidate of candidates){
+      const content=candidate.content.trim().slice(0,500);if(!content)continue;
+      if(this.rows('SELECT id FROM memory_candidates WHERE content=? AND reviewed_at IS NULL',[content]).length)continue;
+      this.db.run('INSERT INTO memory_candidates(id,content,category,source_conversation_id,created_at) VALUES(?,?,?,?,?)',[randomUUID(),content,candidate.category.slice(0,60)||'general',conversationId||null,now]);inserted++;
+    }
+    if(inserted)this.flush();return inserted;
+  }
+  listMemoryCandidates():MemoryCandidateRow[]{return this.rows('SELECT id,content,category,source_conversation_id AS sourceConversationId,created_at AS createdAt FROM memory_candidates WHERE reviewed_at IS NULL ORDER BY created_at DESC') as unknown as MemoryCandidateRow[];}
+  reviewMemoryCandidate(id:string,decision:'approved'|'rejected'):MemoryCandidateRow|undefined{
+    const row=this.rows('SELECT id,content,category,source_conversation_id AS sourceConversationId,created_at AS createdAt FROM memory_candidates WHERE id=? AND reviewed_at IS NULL',[id])[0] as unknown as MemoryCandidateRow|undefined;
+    if(!row)return;
+    this.db.run('UPDATE memory_candidates SET reviewed_at=?,decision=? WHERE id=?',[new Date().toISOString(),decision,id]);this.flush();return row;
+  }
   setting<T>(key:string):T|undefined{const row=this.rows('SELECT value_json FROM settings WHERE key=?',[key])[0];if(!row)return;return JSON.parse(String(row.value_json)) as T;}
   setSetting(key:string,value:unknown):void{this.db.run('INSERT INTO settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at',[key,JSON.stringify(value),new Date().toISOString()]);this.flush();}
   filePath():string{return this.file;}

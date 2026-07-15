@@ -28,6 +28,10 @@ export class Agent {
 
   private provider: Provider;
   private systemPrompt: string;
+  private readonly baseSystemPrompt: string;
+  /** Solo el agente principal (init() llamado) refresca memorias por turno;
+   * los subagentes conservan su prompt-contrato intacto. */
+  private memoriesEnabled = false;
   private toolRegistry: ToolRegistry;
   private history: Message[] = [];
   private confirmationGate: ConfirmationGate | null;
@@ -49,6 +53,7 @@ export class Agent {
     this.provider = options.provider;
     this.toolRegistry = options.toolRegistry;
     this.systemPrompt = options.systemPrompt;
+    this.baseSystemPrompt = options.systemPrompt;
     this.confirmationGate = options.confirmationGate ?? null;
     this.onToolEvent = options.onToolEvent ?? null;
     this.maxToolCalls = options.maxToolCalls ?? 6;
@@ -69,11 +74,16 @@ export class Agent {
   }
 
   async init(): Promise<void> {
-    const memoryStore = getMemoryStore();
-    const memories = await memoryStore.formatForPrompt();
-    if (memories) {
-      this.systemPrompt += `\n\n${memories}`;
-    }
+    this.memoriesEnabled = true;
+    await this.refreshMemories();
+  }
+
+  /** Reconstruye la sección de memorias sobre el prompt base, para que lo
+   * guardado con `remember` durante la sesión entre en contexto sin reiniciar. */
+  private async refreshMemories(): Promise<void> {
+    if (!this.memoriesEnabled) return;
+    const memories = await getMemoryStore().formatForPrompt();
+    this.systemPrompt = memories ? `${this.baseSystemPrompt}\n\n${memories}` : this.baseSystemPrompt;
   }
 
   getHistory(): Message[] {
@@ -98,11 +108,56 @@ export class Agent {
 
   getToolDefinitions() { return this.toolRegistry.getDefinitions(); }
 
+  /** Presupuesto de caracteres del historial enviado al proveedor (~4 chars/token).
+   * Los modelos locales tienen ventanas chicas (num_ctx 8192 ≈ 32k chars totales);
+   * los remotos toleran mucho más. HISTORY_CHAR_BUDGET lo sobreescribe. */
+  private historyCharBudget(): number {
+    const override = parseInt(process.env.HISTORY_CHAR_BUDGET || '', 10);
+    if (Number.isFinite(override) && override > 1000) return override;
+    return this.providerName === 'ollama' ? 20_000 : 150_000;
+  }
+
+  private static messageChars(m: Message): number {
+    if (typeof m.content === 'string') return m.content.length;
+    return m.content.reduce((sum, b) => {
+      if (b.type === 'text') return sum + b.text.length;
+      if (b.type === 'tool_result') return sum + b.content.length;
+      return sum + JSON.stringify(b.input || {}).length;
+    }, 0);
+  }
+
+  /** Historial recortado para el proveedor: si excede el presupuesto, corta
+   * turnos completos desde el inicio (nunca separa un tool_use de su tool_result)
+   * y antepone una nota al primer mensaje conservado. El historial persistido
+   * queda intacto — solo se recorta lo que viaja al modelo. */
+  private trimmedHistory(): Message[] {
+    const budget = this.historyCharBudget();
+    let total = this.history.reduce((sum, m) => sum + Agent.messageChars(m), 0);
+    if (total <= budget) return this.history;
+
+    // Inicios de turno: mensajes user de texto plano (así nunca se corta a
+    // mitad de una cadena assistant(tool_use) -> user(tool_result)).
+    let start = 0;
+    for (let i = 0; i < this.history.length - 1 && total > budget; i++) {
+      total -= Agent.messageChars(this.history[i]);
+      const next = this.history[i + 1];
+      if (next.role === 'user' && typeof next.content === 'string') start = i + 1;
+    }
+    if (start === 0) return this.history;
+
+    const kept = this.history.slice(start);
+    const note = `[Contexto: se omitieron los ${start} mensajes más antiguos de esta conversación por límite de contexto. Si el usuario refiere algo que no ves aquí, dile que no lo tienes presente y pide que lo repita.]`;
+    const first = kept[0];
+    kept[0] = { role: 'user', content: `${note}\n\n${typeof first.content === 'string' ? first.content : ''}` };
+    return kept;
+  }
+
   async *processTurn(userInput: string): AsyncIterable<string> {
     this.aborted = false;
     this.state = 'processing';
     this.toolCallCount = 0;
     this.delegationCount = 0;
+    await this.refreshMemories();
     const now = new Date();
     const ts = now.toLocaleString('es-AR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     const userInputWithTime = `[${ts}]\n\n${userInput}`;
@@ -126,7 +181,7 @@ export class Agent {
       }
       const messages: Message[] = [
         { role: 'system', content: this.systemPrompt },
-        ...this.history,
+        ...this.trimmedHistory(),
       ];
 
       const toolDefs = this.toolRegistry.getDefinitions();

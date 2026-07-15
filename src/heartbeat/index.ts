@@ -130,11 +130,11 @@ export class Heartbeat {
 
   async getActiveNotices(): Promise<string> {
     const text = await this.notices.formatForDisplay();
-    return text || 'No active notices.';
+    return text || 'Sin avisos activos.';
   }
 
   async dismissNotice(id: string): Promise<string> {
     const ok = await this.notices.dismiss(id);
-    return ok ? `✅ Dismissed notice ${id}` : `Notice "${id}" not found.`;
+    return ok ? `✅ Aviso ${id} descartado` : `No encontré el aviso "${id}".`;
   }
 }

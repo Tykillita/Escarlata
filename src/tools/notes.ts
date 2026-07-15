@@ -42,7 +42,7 @@ export const saveNoteTool: Tool = {
     const timestamp = new Date().toISOString();
     const entry = `# ${title}\n> Created: ${timestamp}\n\n${content}\n`;
     await fs.writeFile(filePath, entry, 'utf-8');
-    return `Note "${title}" saved successfully.`;
+    return `Nota "${title}" guardada.`;
   },
 };
 
@@ -62,7 +62,7 @@ export const getNoteTool: Tool = {
       const content = await fs.readFile(filePath, 'utf-8');
       return content;
     } catch {
-      return `Note "${title}" not found. Available notes: ${(await listAllNotes()).join(', ') || 'none'}`;
+      return `No encontré la nota "${title}". Notas disponibles: ${(await listAllNotes()).join(', ') || 'ninguna'}`;
     }
   },
 };
@@ -76,8 +76,8 @@ export const listNotesTool: Tool = {
   },
   handler: async () => {
     const notes = await listAllNotes();
-    if (notes.length === 0) return 'No notes saved yet.';
-    return 'Available notes:\n' + notes.map(n => `- ${n}`).join('\n');
+    if (notes.length === 0) return 'Aún no hay notas guardadas.';
+    return 'Notas disponibles:\n' + notes.map(n => `- ${n}`).join('\n');
   },
 };
 
@@ -108,7 +108,7 @@ export const searchNotesTool: Tool = {
       }
     }
 
-    if (results.length === 0) return `No notes found matching "${query}".`;
-    return `Found in ${results.length} note(s):\n${results.join('\n')}`;
+    if (results.length === 0) return `Ninguna nota coincide con "${query}".`;
+    return `Encontrado en ${results.length} nota(s):\n${results.join('\n')}`;
   },
 };

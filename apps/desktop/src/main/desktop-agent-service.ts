@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Agent, buildSystemPrompt, type ConfirmationResult } from '../../../../src/agent/core.js';
 import { createProvider } from '../../../../src/provider/provider.js';
-import { createTeam } from '../../../../src/agents/team.js';
+import { createTeam, historyToTranscript, type Team } from '../../../../src/agents/team.js';
 import { getConfigManager } from '../../../../src/config/manager.js';
 import { getMemoryStore } from '../../../../src/memory/store.js';
 import { getProviderAuthService, type OAuthProvider } from '../../../../src/provider/auth-service.js';
@@ -42,6 +42,7 @@ export class DesktopAgentService {
   private removeAuthListener: (() => void) | null = null;
   private telemetryTimer: NodeJS.Timeout | null = null;
   private heartbeat: Heartbeat | null = null;
+  private team: Team | null = null;
   private readonly noticeBoard = getNoticeBoard();
   private noticeListener: ((notice: Notice) => void) | null = null;
   constructor(private readonly store:LocalStore,private readonly vault:SecretVault,private readonly emit:(event:Record<string,unknown>)=>void){this.localAuth=new LocalAuth(vault);}
@@ -60,7 +61,8 @@ export class DesktopAgentService {
     if(Object.keys(config.apiKeys).length){ await manager.set('apiKeys',{}); }
     const selected=await this.resolveStartupProvider(config);
     const provider=selected.provider;
-    const team=createTeam({getProvider:()=>this.agent?.getProvider()??provider,getConfirmationGate:()=>this.confirm,getSafetyRuleResolver:()=>action=>manager.getRule(action),onToolEvent:event=>this.emit({type:'tool_event',sub:event.type,name:event.name,input:event.input,result:event.result,duration:event.duration})});
+    const team=createTeam({getProvider:()=>this.agent?.getProvider()??provider,getConfirmationGate:()=>this.confirm,getSafetyRuleResolver:()=>action=>manager.getRule(action),onToolEvent:event=>this.emit({type:'tool_event',sub:event.type,name:event.name,input:event.input,result:event.result,duration:event.duration}),onMemoryCandidates:candidates=>{const inserted=this.store.addMemoryCandidates(candidates,this.conversationId);if(inserted)this.emitMemoryCandidates();}});
+    this.team=team;
     this.agent=new Agent({provider,toolRegistry:team.registry,systemPrompt:buildSystemPrompt(team.registry,{surface:'chat'}),confirmationGate:this.confirm,onToolEvent:event=>this.emit({type:'tool_event',sub:event.type,name:event.name,input:event.input,result:event.result,duration:event.duration}),safetyRuleResolver:action=>manager.getRule(action)});
     this.agent.setProvider(provider,selected.name,selected.model);
     await this.agent.init();
@@ -173,8 +175,15 @@ export class DesktopAgentService {
   }
   private cachedTelemetry(provider:VitalsProvider):TelemetryCache|undefined{return this.store.setting<TelemetryCache>(`telemetry:${provider}`);}
   private cachedUsageStats():UsageStatsCache|undefined{return this.store.setting<UsageStatsCache>('usageStatsCache');}
-  private async sendState():Promise<void>{const config=getConfigManager().get();const auth={...this.localAuth.status(),windowsHelloAvailable:false,unlocked:this.unlocked};const anthropicCache=this.cachedTelemetry('anthropic');const openAICache=this.cachedTelemetry('openai');const statsCache=this.cachedUsageStats();this.emit({type:'auth_ok'});this.emit({type:'state',desktop:true,profile:this.store.profile(),auth,onboarding:this.store.setting('onboarding')||{completed:false},defaultVaultDirectory:process.env.DEFAULT_VAULT_DIR||'vault',modelsDir:this.modelsDirectory(),history:this.agent.getHistory(),tools:this.agent.getToolDefinitions(),config:{...config,apiKeys:{}},facts:await getMemoryStore().getAll(),conversations:this.store.listConversations(),currentConvId:this.conversationId,vitalsByProvider:{anthropic:anthropicCache?.metrics||null,openai:openAICache?.metrics||null},telemetryCache:{anthropic:anthropicCache?.updatedAt,openai:openAICache?.updatedAt},usageStats:statsCache?.days||[]});void windowsHelloAvailable().then(available=>this.emit({type:'auth_state',...this.localAuth.status(),windowsHelloAvailable:available,unlocked:this.unlocked}));}
+  private async sendState():Promise<void>{const config=getConfigManager().get();const auth={...this.localAuth.status(),windowsHelloAvailable:false,unlocked:this.unlocked};const anthropicCache=this.cachedTelemetry('anthropic');const openAICache=this.cachedTelemetry('openai');const statsCache=this.cachedUsageStats();this.emit({type:'auth_ok'});this.emit({type:'state',desktop:true,profile:this.store.profile(),auth,onboarding:this.store.setting('onboarding')||{completed:false},defaultVaultDirectory:process.env.DEFAULT_VAULT_DIR||'vault',modelsDir:this.modelsDirectory(),history:this.agent.getHistory(),tools:this.agent.getToolDefinitions(),config:{...config,apiKeys:{}},facts:await getMemoryStore().getAll(),memoryCandidates:this.store.listMemoryCandidates(),conversations:this.store.listConversations(),currentConvId:this.conversationId,vitalsByProvider:{anthropic:anthropicCache?.metrics||null,openai:openAICache?.metrics||null},telemetryCache:{anthropic:anthropicCache?.updatedAt,openai:openAICache?.updatedAt},usageStats:statsCache?.days||[]});void windowsHelloAvailable().then(available=>this.emit({type:'auth_state',...this.localAuth.status(),windowsHelloAvailable:available,unlocked:this.unlocked}));}
   private async emitNotices(): Promise<void> { this.emit({ type: 'notices', active: await this.noticeBoard.getActive(), all: await this.noticeBoard.getAll() }); }
+  private emitMemoryCandidates(): void { this.emit({ type: 'memory_candidates', candidates: this.store.listMemoryCandidates() }); }
+  /** Análisis Amatista en background sobre la conversación al abandonarla (cambio de chat, chat nuevo, cierre). */
+  private analyzeCurrentConversation(): void {
+    const history = this.agent?.getHistory() ?? [];
+    if (history.length < 2) return;
+    this.team?.analyzeConversation(historyToTranscript(history));
+  }
   private telemetryPlaceholder(provider: VitalsProvider, status: string): VitalMetric[] {
     const label=provider==='openai'?'CHATGPT':'CLAUDE';
     return [
@@ -250,8 +259,8 @@ export class DesktopAgentService {
     case 'get_notices': return this.emitNotices();
     case 'dismiss_notice': { const dismissed = await this.noticeBoard.dismiss(command.id); if (dismissed) this.emit({ type: 'notice_dismissed', id: command.id }); return; }
     case 'set_heartbeat': if (command.paused) this.heartbeat?.pause(); else this.heartbeat?.resume(); return;
-    case 'new_chat':this.conversationId=randomUUID();this.agent.clearHistory();this.emit({type:'history_cleared'});this.emit({type:'greeting',content:'¡Hola! ¿En qué puedo ayudarte hoy?'});return;
-    case 'switch_chat':this.conversationId=command.id;this.agent.restoreHistory(this.store.loadConversation(command.id));return this.sendState();
+    case 'new_chat':this.analyzeCurrentConversation();this.conversationId=randomUUID();this.agent.clearHistory();this.emit({type:'history_cleared'});this.emit({type:'greeting',content:'¡Hola! ¿En qué puedo ayudarte hoy?'});return;
+    case 'switch_chat':this.analyzeCurrentConversation();this.conversationId=command.id;this.agent.restoreHistory(this.store.loadConversation(command.id));return this.sendState();
     case 'delete_conversation':this.store.deleteConversation(command.id);if(command.id===this.conversationId){this.conversationId=randomUUID();this.agent.clearHistory();}this.emit({type:'conversations',list:this.store.listConversations(),currentConvId:this.conversationId});return;
     case 'rename_conversation':this.store.renameConversation(command.id,command.title);this.emit({type:'conversations',list:this.store.listConversations(),currentConvId:this.conversationId});return;
     case 'clear_history':this.agent.clearHistory();this.store.saveConversation(this.conversationId,[]);this.emit({type:'history_cleared'});return;
@@ -259,6 +268,12 @@ export class DesktopAgentService {
     case 'get_vault_files':return this.refreshWorkspaceState();
     case 'get_directives':this.emit({type:'directives',items:await readDirectives()});return;
     case 'delete_memory':await getMemoryStore().remove(command.id);this.emit({type:'memories',facts:await getMemoryStore().getAll()});return;
+    case 'get_memory_candidates':return this.emitMemoryCandidates();
+    case 'review_memory_candidate':{
+      const candidate=this.store.reviewMemoryCandidate(command.id,command.decision);
+      if(candidate&&command.decision==='approved'){await getMemoryStore().add(candidate.content,candidate.category);this.emit({type:'memories',facts:await getMemoryStore().getAll()});}
+      this.emitMemoryCandidates();return;
+    }
     case 'set_provider':{
       const manager=getConfigManager();
       // La key candidata NO se persiste todavía: primero se valida contra el proveedor.
@@ -383,5 +398,5 @@ export class DesktopAgentService {
     default:this.emit({type:'error',code:'NOT_IMPLEMENTED',message:`El comando ${command.type} aún no está disponible en desktop.`});
   }}
   denyPendingConfirmations():void{for(const pending of this.pending.values()){clearTimeout(pending.timer);pending.resolve('denied');}this.pending.clear();}
-  dispose():void{this.denyPendingConfirmations();this.removeAuthListener?.();this.removeAuthListener=null;if(this.telemetryTimer)clearInterval(this.telemetryTimer);this.telemetryTimer=null;this.heartbeat?.stop();this.heartbeat=null;if(this.noticeListener)this.noticeBoard.off('added',this.noticeListener);this.noticeListener=null;}
+  dispose():void{this.analyzeCurrentConversation();this.denyPendingConfirmations();this.removeAuthListener?.();this.removeAuthListener=null;if(this.telemetryTimer)clearInterval(this.telemetryTimer);this.telemetryTimer=null;this.heartbeat?.stop();this.heartbeat=null;if(this.noticeListener)this.noticeBoard.off('added',this.noticeListener);this.noticeListener=null;}
 }

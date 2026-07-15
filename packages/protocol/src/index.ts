@@ -14,6 +14,8 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('switch_chat'), id }), z.object({ type: z.literal('delete_conversation'), id }),
   z.object({ type: z.literal('rename_conversation'), id, title: shortText }),
   z.object({ type: z.literal('delete_memory'), id }), z.object({ type: z.literal('dismiss_notice'), id }),
+  z.object({ type: z.literal('get_memory_candidates') }),
+  z.object({ type: z.literal('review_memory_candidate'), id, decision: z.enum(['approved', 'rejected']) }),
   z.object({ type: z.literal('edit_message'), messageId: id, content: z.string().trim().min(1).max(32_000) }),
   z.object({ type: z.literal('set_heartbeat'), paused: z.boolean() }),
   z.object({ type: z.literal('scan_models_dir'), directory: z.string().min(1).max(1_024) }),

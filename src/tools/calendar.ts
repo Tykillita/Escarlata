@@ -69,11 +69,11 @@ export const getTodayTool: Tool = {
     const dateStr = formatDate(today);
 
     if (todayEvents.length === 0) {
-      return `${dateStr} — No events scheduled.`;
+      return `${dateStr} — Sin eventos agendados.`;
     }
 
-    return `${dateStr} — ${todayEvents.length} event(s):\n` + todayEvents
-      .map(e => `- ${e.time || 'All day'}: ${e.title}${e.duration ? ` (${e.duration})` : ''}${e.notes ? ` — ${e.notes}` : ''}`)
+    return `${dateStr} — ${todayEvents.length} evento(s):\n` + todayEvents
+      .map(e => `- ${e.time || 'Todo el día'}: ${e.title}${e.duration ? ` (${e.duration})` : ''}${e.notes ? ` — ${e.notes}` : ''}`)
       .join('\n');
   },
 };
@@ -91,7 +91,7 @@ export const getWeekTool: Tool = {
     const weekEvents = events.filter(e => e.date >= week.start && e.date <= week.end);
 
     if (weekEvents.length === 0) {
-      return `This week (${formatDate(week.start)} — ${formatDate(week.end)}) — No events scheduled.`;
+      return `Esta semana (${formatDate(week.start)} — ${formatDate(week.end)}) — Sin eventos agendados.`;
     }
 
     // Group by date
@@ -101,11 +101,11 @@ export const getWeekTool: Tool = {
       byDate[e.date].push(e);
     }
 
-    let output = `This week (${formatDate(week.start)} — ${formatDate(week.end)}):\n`;
+    let output = `Esta semana (${formatDate(week.start)} — ${formatDate(week.end)}):\n`;
     for (const [date, evts] of Object.entries(byDate).sort()) {
       output += `\n${formatDate(date)}:\n`;
       for (const e of evts) {
-        output += `  ${e.time || 'All day'}: ${e.title}${e.duration ? ` (${e.duration})` : ''}${e.done ? ' ✅' : ''}\n`;
+        output += `  ${e.time || 'Todo el día'}: ${e.title}${e.duration ? ` (${e.duration})` : ''}${e.done ? ' ✅' : ''}\n`;
       }
     }
     return output;
@@ -169,7 +169,7 @@ export const upcomingEventsTool: Tool = {
     const upcoming = events.filter(e => e.date >= today && e.date <= future);
 
     if (upcoming.length === 0) {
-      return `No upcoming events in the next ${days} days.`;
+      return `Sin eventos próximos en los siguientes ${days} días.`;
     }
 
     const byDate: Record<string, CalendarEvent[]> = {};
@@ -178,11 +178,11 @@ export const upcomingEventsTool: Tool = {
       byDate[e.date].push(e);
     }
 
-    let output = `Upcoming (next ${days} days):\n`;
+    let output = `Próximos ${days} días:\n`;
     for (const [date, evts] of Object.entries(byDate).sort()) {
       output += `\n${formatDate(date)}:\n`;
       for (const e of evts) {
-        output += `  ${e.time || 'All day'}: ${e.title}${e.done ? ' ✅' : ''}\n`;
+        output += `  ${e.time || 'Todo el día'}: ${e.title}${e.done ? ' ✅' : ''}\n`;
       }
     }
     return output;

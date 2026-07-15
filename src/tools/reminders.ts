@@ -113,17 +113,17 @@ export const setReminderTool: Tool = {
   handler: async (input) => {
     const msg = String(input.message || '').trim();
     const timeStr = String(input.time || '').trim();
-    if (!msg || !timeStr) return 'I need both a message and a time. Example: set_reminder(message: "call mom", time: "a las 3pm")';
+    if (!msg || !timeStr) return 'Necesito el mensaje y la hora. Ejemplo: set_reminder(message: "llamar a mamá", time: "a las 3pm")';
 
     const parsed = parseNaturalTime(timeStr);
     if (!parsed) {
-      return `Could not understand the time "${timeStr}". Try formats like: "a las 3pm", "en 10 minutos", "mañana a las 9", "in 2 hours".`;
+      return `No entendí la hora "${timeStr}". Prueba formatos como: "a las 3pm", "en 10 minutos", "mañana a las 9".`;
     }
 
     const store = getReminderStore();
     const reminder = await store.add(msg, parsed.datetime);
 
-    return `Reminder set! I will remind you "${msg}" at ${parsed.display}. Reminder ID: ${reminder.id}`;
+    return `Recordatorio creado: te recordaré "${msg}" ${parsed.display}. Id: ${reminder.id}`;
   },
 };
 
@@ -137,19 +137,19 @@ export const listRemindersTool: Tool = {
   handler: async () => {
     const store = getReminderStore();
     const all = await store.getAll();
-    if (all.length === 0) return 'No reminders set.';
+    if (all.length === 0) return 'No hay recordatorios.';
     const pending = all.filter(r => !r.fired);
     const fired = all.filter(r => r.fired);
     const lines: string[] = [];
     if (pending.length > 0) {
-      lines.push(`📋 Pending reminders (${pending.length}):`);
+      lines.push(`📋 Recordatorios pendientes (${pending.length}):`);
       for (const r of pending) {
         const t = new Date(r.time).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
-        lines.push(`  ${r.id}: "${r.message}" at ${t}`);
+        lines.push(`  ${r.id}: "${r.message}" a las ${t}`);
       }
     }
     if (fired.length > 0) {
-      lines.push(`✅ Fired reminders (${fired.length}):`);
+      lines.push(`✅ Recordatorios ya avisados (${fired.length}):`);
       for (const r of fired) {
         lines.push(`  ${r.id}: "${r.message}"`);
       }
@@ -170,9 +170,9 @@ export const cancelReminderTool: Tool = {
   },
   handler: async (input) => {
     const id = String(input.id || '').trim();
-    if (!id) return 'Please provide the reminder ID to cancel.';
+    if (!id) return 'Indica el id del recordatorio a cancelar.';
     const store = getReminderStore();
     const ok = await store.cancel(id);
-    return ok ? `Reminder ${id} cancelled.` : `Reminder ${id} not found. Use list_reminders to see active reminders.`;
+    return ok ? `Recordatorio ${id} cancelado.` : `No encontré el recordatorio ${id}. Usa list_reminders para ver los activos.`;
   },
 };
