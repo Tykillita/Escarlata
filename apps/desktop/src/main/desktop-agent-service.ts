@@ -88,6 +88,10 @@ export class DesktopAgentService {
     const preferredModel=process.env.MODEL_NAME||config.modelName;
     const usable=async(name:string,model:string):Promise<{provider:Provider;name:string;model:string}|null>=>{
       const normalized=name.toLowerCase();const authMethod=config.authMethods[normalized]||'api_key';
+      if(normalized==='ollama'){
+        const installed=await getInstalledOllamaModels();
+        if(!installed.length || (model && !installed.some(item=>item.name===model))) return null;
+      }
       if(normalized==='anthropic'||normalized==='openai'){
         const connected=authMethod==='oauth_local'?(await this.providerAuth.getStatus(normalized)).state==='connected':Boolean(this.vault.get(normalized));
         if(!connected)return null;
@@ -175,7 +179,7 @@ export class DesktopAgentService {
   }
   private cachedTelemetry(provider:VitalsProvider):TelemetryCache|undefined{return this.store.setting<TelemetryCache>(`telemetry:${provider}`);}
   private cachedUsageStats():UsageStatsCache|undefined{return this.store.setting<UsageStatsCache>('usageStatsCache');}
-  private async sendState():Promise<void>{const config=getConfigManager().get();const auth={...this.localAuth.status(),windowsHelloAvailable:false,unlocked:this.unlocked};const anthropicCache=this.cachedTelemetry('anthropic');const openAICache=this.cachedTelemetry('openai');const statsCache=this.cachedUsageStats();this.emit({type:'auth_ok'});this.emit({type:'state',desktop:true,profile:this.store.profile(),auth,onboarding:this.store.setting('onboarding')||{completed:false},defaultVaultDirectory:process.env.DEFAULT_VAULT_DIR||'vault',modelsDir:this.modelsDirectory(),history:this.agent.getHistory(),tools:this.agent.getToolDefinitions(),config:{...config,apiKeys:{}},facts:await getMemoryStore().getAll(),memoryCandidates:this.store.listMemoryCandidates(),conversations:this.store.listConversations(),currentConvId:this.conversationId,chatFolders:this.store.setting('chatFolders')||{folders:[],assign:{}},vitalsByProvider:{anthropic:anthropicCache?.metrics||null,openai:openAICache?.metrics||null},telemetryCache:{anthropic:anthropicCache?.updatedAt,openai:openAICache?.updatedAt},usageStats:statsCache?.days||[]});void windowsHelloAvailable().then(available=>this.emit({type:'auth_state',...this.localAuth.status(),windowsHelloAvailable:available,unlocked:this.unlocked}));}
+  private async sendState():Promise<void>{const config=getConfigManager().get();const auth={...this.localAuth.status(),windowsHelloAvailable:false,unlocked:this.unlocked};const anthropicCache=this.cachedTelemetry('anthropic');const openAICache=this.cachedTelemetry('openai');const statsCache=this.cachedUsageStats();this.emit({type:'auth_ok'});this.emit({type:'state',desktop:true,profile:this.store.profile(),auth,onboarding:this.store.setting('onboarding')||{completed:false},defaultVaultDirectory:process.env.DEFAULT_VAULT_DIR||'vault',modelsDir:this.modelsDirectory(),provider:this.agent.providerName,model:this.agent.modelName,history:this.agent.getHistory(),tools:this.agent.getToolDefinitions(),config:{...config,apiKeys:{}},facts:await getMemoryStore().getAll(),memoryCandidates:this.store.listMemoryCandidates(),conversations:this.store.listConversations(),currentConvId:this.conversationId,chatFolders:this.store.setting('chatFolders')||{folders:[],assign:{}},vitalsByProvider:{anthropic:anthropicCache?.metrics||null,openai:openAICache?.metrics||null},telemetryCache:{anthropic:anthropicCache?.updatedAt,openai:openAICache?.updatedAt},usageStats:statsCache?.days||[]});void windowsHelloAvailable().then(available=>this.emit({type:'auth_state',...this.localAuth.status(),windowsHelloAvailable:available,unlocked:this.unlocked}));}
   private async emitNotices(): Promise<void> { this.emit({ type: 'notices', active: await this.noticeBoard.getActive(), all: await this.noticeBoard.getAll() }); }
   private emitMemoryCandidates(): void { this.emit({ type: 'memory_candidates', candidates: this.store.listMemoryCandidates() }); }
   /** Análisis Amatista en background sobre la conversación al abandonarla (cambio de chat, chat nuevo, cierre). */
@@ -307,6 +311,12 @@ export class DesktopAgentService {
         }
       }else if(remoteProvider&&!candidateKey){
         this.emit({type:'error',code:'PROVIDER_CREDENTIAL_REQUIRED',message:'Introduce una API key antes de activar este proveedor.'});return;
+      }
+      if(command.provider==='ollama'){
+        const installed=await getInstalledOllamaModels();
+        if(!installed.some(item=>item.name===command.model)){
+          this.emit({type:'error',code:'OLLAMA_UNAVAILABLE',message:'Ollama no está disponible o el modelo seleccionado no está instalado.'});return;
+        }
       }
       let provider:Provider;
       try{provider=createProvider({provider:command.provider,model:command.model,apiKey:candidateKey,authMethod:command.authMethod});}

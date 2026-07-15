@@ -28,11 +28,14 @@ const preferences = (): DesktopPreferences => store ? getDesktopPreferences(stor
 function applyWindowChrome(window: BrowserWindow): void { window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#101014' : '#f7f7f9'); }
 function heartRoot(userData: string): string { const pointer = join(userData, 'heart-location.json'); if (!existsSync(pointer)) return userData; try { const data = JSON.parse(readFileSync(pointer, 'utf8')) as { heartDirectory?: string }; return data.heartDirectory && existsSync(data.heartDirectory) ? data.heartDirectory : userData; } catch { return userData; } }
 function showWindow(notificationId?: string): void { if (!windowRef) { void createWindow(); return; } if (windowRef.isMinimized()) windowRef.restore(); windowRef.show(); windowRef.focus(); if (notificationId) emit({ type: 'notification_activated', id: notificationId }); }
-function trayImage() { return nativeImage.createFromDataURL('data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><circle cx="16" cy="16" r="14" fill="#bb2549"/><path d="M10 16h12M16 10v12" stroke="white" stroke-width="2.5" stroke-linecap="round"/></svg>').toString('base64')); }
+function appIconPath(): string { return app.isPackaged ? join(process.resourcesPath, 'EscarlataAppIcon.ico') : join(process.cwd(), 'ui', 'public', 'EscarlataAppIcon.ico'); }
+function trayIconPath(): string { return app.isPackaged ? join(process.resourcesPath, 'EscarlataTray.png') : join(process.cwd(), 'ui', 'public', 'EscarlataTray.png'); }
+function trayImage() { return nativeImage.createFromPath(trayIconPath()).resize({ width: 32, height: 32 }); }
 function updateTray(): void {
   const prefs = preferences();
   if (!prefs.tray.enabled) { tray?.destroy(); tray = null; return; }
   if (!tray) { tray = new Tray(trayImage()); tray.on('click', () => windowRef?.isVisible() ? windowRef.hide() : showWindow()); }
+  else tray.setImage(trayImage());
   const notices = store?.setting<{ count?: number }>('trayNoticeCount')?.count || 0;
   tray.setToolTip(notices ? `Escarlata — ${notices} pendientes` : 'Escarlata');
   tray.setContextMenu(Menu.buildFromTemplate([
@@ -60,7 +63,7 @@ async function createWindow(): Promise<void> {
   });
   await service.init();
   notificationService = new DesktopNotificationService(preferences, id => showWindow(id));
-  windowRef = new BrowserWindow({ width: 1440, height: 960, minWidth: 1000, minHeight: 700, show: !(preferences().startup.enabled && preferences().startup.startMinimized), frame: false, backgroundColor: nativeTheme.shouldUseDarkColors ? '#101014' : '#f7f7f9', webPreferences: { preload: join(__dirname, '../preload/index.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  windowRef = new BrowserWindow({ width: 1440, height: 960, minWidth: 1000, minHeight: 700, show: !(preferences().startup.enabled && preferences().startup.startMinimized), frame: false, icon: appIconPath(), backgroundColor: nativeTheme.shouldUseDarkColors ? '#101014' : '#f7f7f9', webPreferences: { preload: join(__dirname, '../preload/index.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   applyWindowChrome(windowRef); windowRef.once('ready-to-show', () => { if (!(preferences().startup.enabled && preferences().startup.startMinimized)) windowRef?.show(); });
   windowRef.on('close', event => { if (!isQuitting && preferences().tray.enabled && preferences().tray.closeToTray) { event.preventDefault(); windowRef?.hide(); } });
   (windowRef as BrowserWindow & { on(event: 'minimize', listener: (event: { preventDefault(): void }) => void): BrowserWindow }).on('minimize', (event: { preventDefault(): void }) => { if (preferences().tray.enabled && preferences().tray.minimizeToTray) { event.preventDefault(); windowRef?.hide(); } });
@@ -72,6 +75,7 @@ async function createWindow(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  if (process.platform === 'win32') app.setAppUserModelId('com.escarlata.desktop');
   const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://*.googleapis.com https://securetoken.googleapis.com; frame-src https://accounts.google.com https://*.firebaseapp.com; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [csp] } }));
   nativeTheme.on('updated', () => { if (windowRef) applyWindowChrome(windowRef); });
