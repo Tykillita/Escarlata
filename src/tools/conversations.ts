@@ -1,24 +1,61 @@
 import { Tool } from './registry.js';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { dataPath } from '../config/paths.js';
 
-// Read-only access to stored conversations (data/conversations/) so Amatista
-// can mine past chats for durable facts. Only registered to her profile.
+// Read-only access to stored conversations so Amatista can mine past chats
+// for durable facts. Only registered to her profile.
+//
+// The storage backend is pluggable: the desktop injects a SQLite-backed
+// source (LocalStore) via setConversationSource(); without injection the
+// tools fall back to the legacy JSON directory used by the CLI and tests.
 
-const CONV_DIR = process.env.CONVERSATIONS_DIR || path.join(process.cwd(), 'data', 'conversations');
-
-interface ConvIndexEntry {
+export interface ConversationSummaryEntry {
   id: string;
   title: string;
-  createdAt: string;
   updatedAt: string;
   messageCount: number;
 }
 
-type StoredMessage = {
+export type StoredMessage = {
   role: string;
   content: string | Array<{ type: string; text?: string; content?: unknown }>;
 };
+
+export interface ConversationSource {
+  list(): ConversationSummaryEntry[] | Promise<ConversationSummaryEntry[]>;
+  /** null cuando la conversación no existe */
+  read(id: string): StoredMessage[] | null | Promise<StoredMessage[] | null>;
+}
+
+function getConvDir(): string {
+  return process.env.CONVERSATIONS_DIR || dataPath('conversations');
+}
+
+const jsonDirSource: ConversationSource = {
+  async list() {
+    try {
+      const index = JSON.parse(await fs.readFile(path.join(getConvDir(), 'index.json'), 'utf-8')) as ConversationSummaryEntry[];
+      return index;
+    } catch {
+      return [];
+    }
+  },
+  async read(id: string) {
+    try {
+      return JSON.parse(await fs.readFile(path.join(getConvDir(), `${id}.json`), 'utf-8')) as StoredMessage[];
+    } catch {
+      return null;
+    }
+  },
+};
+
+let activeSource: ConversationSource = jsonDirSource;
+
+/** El desktop inyecta aquí su almacén real (SQLite) al arrancar. */
+export function setConversationSource(source: ConversationSource): void {
+  activeSource = source;
+}
 
 function blockText(content: StoredMessage['content']): string {
   if (typeof content === 'string') return content;
@@ -39,12 +76,7 @@ export const listConversationsTool: Tool = {
   },
   handler: async (input) => {
     const limit = typeof input.limit === 'number' ? Math.max(1, Math.min(50, input.limit)) : 10;
-    let index: ConvIndexEntry[];
-    try {
-      index = JSON.parse(await fs.readFile(path.join(CONV_DIR, 'index.json'), 'utf-8'));
-    } catch {
-      return 'No hay conversaciones guardadas.';
-    }
+    const index = await activeSource.list();
     if (index.length === 0) return 'No hay conversaciones guardadas.';
     const rows = index.slice(0, limit).map(c => {
       const title = c.title.replace(/\[[^\]]*\]\s*/g, '').replace(/\n/g, ' ').slice(0, 60);
@@ -66,10 +98,8 @@ export const readConversationTool: Tool = {
   handler: async (input) => {
     const id = String(input.id || '').trim().replace(/[^a-zA-Z0-9_-]/g, '');
     if (!id) return 'Indica el id de la conversación.';
-    let messages: StoredMessage[];
-    try {
-      messages = JSON.parse(await fs.readFile(path.join(CONV_DIR, `${id}.json`), 'utf-8'));
-    } catch {
+    const messages = await activeSource.read(id);
+    if (!messages || messages.length === 0) {
       return `No encontré la conversación "${id}". Usa list_conversations para ver los ids.`;
     }
     const turns = messages

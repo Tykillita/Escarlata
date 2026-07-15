@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import type { AuthMethod } from '../provider/types.js';
+import { dataPath } from './paths.js';
 
 export interface SafetyRule {
   action: string;
@@ -22,7 +23,7 @@ export interface EscarlataConfig {
 }
 
 export function getConfigPath(): string {
-  return process.env.CONFIG_FILE || path.join(process.cwd(), 'data', 'config.json');
+  return process.env.CONFIG_FILE || dataPath('config.json');
 }
 
 const DEFAULTS: EscarlataConfig = {

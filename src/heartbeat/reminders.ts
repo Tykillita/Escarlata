@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { dataPath } from '../config/paths.js';
 
 export interface Reminder {
   id: string;
@@ -9,10 +10,8 @@ export interface Reminder {
   fired: boolean;
 }
 
-const REMINDERS_FILE = process.env.REMINDERS_FILE || path.join(process.cwd(), 'data', 'reminders.json');
-
 function getFilePath(): string {
-  return REMINDERS_FILE;
+  return process.env.REMINDERS_FILE || dataPath('reminders.json');
 }
 
 export class ReminderStore {

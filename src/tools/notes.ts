@@ -1,22 +1,25 @@
 import { Tool } from './registry.js';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { dataPath } from '../config/paths.js';
 
-const NOTES_DIR = process.env.NOTES_DIR || path.join(process.cwd(), 'data', 'notes');
+function getNotesDir(): string {
+  return process.env.NOTES_DIR || dataPath('notes');
+}
 
 async function ensureDir() {
-  await fs.mkdir(NOTES_DIR, { recursive: true });
+  await fs.mkdir(getNotesDir(), { recursive: true });
 }
 
 async function getNotesPath(file: string): Promise<string> {
   // Sanitize: prevent path traversal
   const safe = file.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return path.join(NOTES_DIR, `${safe}.md`);
+  return path.join(getNotesDir(), `${safe}.md`);
 }
 
 async function listAllNotes(): Promise<string[]> {
   await ensureDir();
-  const files = await fs.readdir(NOTES_DIR);
+  const files = await fs.readdir(getNotesDir());
   return files.filter(f => f.endsWith('.md')).map(f => f.replace(/\.md$/, ''));
 }
 
@@ -90,12 +93,12 @@ export const searchNotesTool: Tool = {
   handler: async (input) => {
     const query = String(input.query || '').toLowerCase();
     await ensureDir();
-    const files = await fs.readdir(NOTES_DIR);
+    const files = await fs.readdir(getNotesDir());
     const results: string[] = [];
 
     for (const file of files) {
       if (!file.endsWith('.md')) continue;
-      const content = await fs.readFile(path.join(NOTES_DIR, file), 'utf-8');
+      const content = await fs.readFile(path.join(getNotesDir(), file), 'utf-8');
       if (content.toLowerCase().includes(query)) {
         const title = file.replace(/\.md$/, '');
         // Find the matching snippet

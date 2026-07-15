@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { dataPath } from './paths.js';
 
 export interface AuditEntry {
   timestamp: string;
@@ -9,7 +10,7 @@ export interface AuditEntry {
 }
 
 function getAuditPath(): string {
-  return process.env.AUDIT_FILE || path.join(process.cwd(), 'data', 'audit.log');
+  return process.env.AUDIT_FILE || dataPath('audit.log');
 }
 
 async function ensureDir(): Promise<void> {

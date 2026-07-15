@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
+import { dataPath } from '../config/paths.js';
 
 /** Acción rápida: la UI la muestra como botón y manda `command` como mensaje al agente */
 export interface NoticeAction {
@@ -20,7 +21,7 @@ export interface Notice {
 }
 
 function getNoticesPath(): string {
-  return process.env.NOTICES_FILE || path.join(process.cwd(), 'data', 'notices.json');
+  return process.env.NOTICES_FILE || dataPath('notices.json');
 }
 
 /** Retención: los descartados se podan pasados 7 días */

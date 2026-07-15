@@ -2,9 +2,11 @@ import { Tool } from './registry.js';
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import * as cheerio from 'cheerio';
+import { dataPath } from '../config/paths.js';
 
-const LOCAL_DOCS_DIR = process.env.LOCAL_DOCS_DIR || path.join(process.cwd(), 'data', 'docs');
-const OBSIDIAN_VAULT = process.env.OBSIDIAN_VAULT || '';
+function getLocalDocsDir(): string {
+  return process.env.LOCAL_DOCS_DIR || dataPath('docs');
+}
 
 /** Resolve a user-supplied relative path inside baseDir, or null if it escapes it. */
 function resolveInside(baseDir: string, relPath: string): string | null {
@@ -18,13 +20,14 @@ function resolveInside(baseDir: string, relPath: string): string | null {
 // Search local documentation files for matches
 async function searchLocalDocs(query: string): Promise<string> {
   try {
-    await fs.mkdir(LOCAL_DOCS_DIR, { recursive: true });
-    const files = await fs.readdir(LOCAL_DOCS_DIR);
+    const docsDir = getLocalDocsDir();
+    await fs.mkdir(docsDir, { recursive: true });
+    const files = await fs.readdir(docsDir);
     const results: { file: string; snippet: string }[] = [];
 
     for (const file of files) {
       if (!file.match(/\.(txt|md|json|csv|log)$/)) continue;
-      const content = await fs.readFile(path.join(LOCAL_DOCS_DIR, file), 'utf-8');
+      const content = await fs.readFile(path.join(docsDir, file), 'utf-8');
       const lines = content.split('\n');
       const lowerQuery = query.toLowerCase();
 
@@ -129,7 +132,7 @@ export const editLocalFileTool: Tool = {
       await fs.writeFile(todoPath, content, 'utf-8');
       return `TODO-LIST.md actualizado (${content.length} bytes).`;
     }
-    const filePath = resolveInside(LOCAL_DOCS_DIR, normalized);
+    const filePath = resolveInside(getLocalDocsDir(), normalized);
     if (!filePath) return 'Acceso denegado: la ruta sale del directorio permitido.';
     try {
       await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -155,13 +158,13 @@ export const readLocalFileTool: Tool = {
     if (!filename.trim()) return 'Please specify a filename to read (e.g., "notes.txt", "readme.md", "subfolder/note.md").';
     // Sanitize: prevent path traversal (allow subdirectories)
     const normalized = filename.replace(/\\/g, '/').replace(/^\/+/, '');
-    const filePath = resolveInside(LOCAL_DOCS_DIR, normalized);
+    const filePath = resolveInside(getLocalDocsDir(), normalized);
     if (!filePath) return 'Acceso denegado: la ruta sale del directorio permitido.';
 
     try {
-      // Verify the resolved path (symlinks included) is still within LOCAL_DOCS_DIR
+      // Verify the resolved path (symlinks included) is still within the docs dir
       const resolved = await fs.realpath(filePath);
-      const baseDir = await fs.realpath(LOCAL_DOCS_DIR);
+      const baseDir = await fs.realpath(getLocalDocsDir());
       const rel = path.relative(baseDir, resolved);
       if (rel.startsWith('..') || path.isAbsolute(rel)) {
         return 'Acceso denegado: la ruta sale del directorio permitido.';

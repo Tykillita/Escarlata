@@ -1,8 +1,17 @@
 import { Tool } from './registry.js';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { dataPath } from '../config/paths.js';
 
-const CALENDAR_FILE = process.env.CALENDAR_FILE || path.join(process.cwd(), 'data', 'calendar.json');
+function getCalendarPath(): string {
+  return process.env.CALENDAR_FILE || dataPath('calendar.json');
+}
+
+/** Fecha YYYY-MM-DD en hora LOCAL (toISOString daría la fecha UTC: en
+ * husos negativos, desde la tarde "hoy" sería mañana). */
+function localDate(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 interface CalendarEvent {
   title: string;
@@ -15,7 +24,7 @@ interface CalendarEvent {
 
 async function loadEvents(): Promise<CalendarEvent[]> {
   try {
-    const data = await fs.readFile(CALENDAR_FILE, 'utf-8');
+    const data = await fs.readFile(getCalendarPath(), 'utf-8');
     return JSON.parse(data);
   } catch {
     return [];
@@ -23,8 +32,8 @@ async function loadEvents(): Promise<CalendarEvent[]> {
 }
 
 async function saveEvents(events: CalendarEvent[]): Promise<void> {
-  await fs.mkdir(path.dirname(CALENDAR_FILE), { recursive: true });
-  await fs.writeFile(CALENDAR_FILE, JSON.stringify(events, null, 2), 'utf-8');
+  await fs.mkdir(path.dirname(getCalendarPath()), { recursive: true });
+  await fs.writeFile(getCalendarPath(), JSON.stringify(events, null, 2), 'utf-8');
 }
 
 function formatDate(dateStr: string): string {
@@ -41,8 +50,8 @@ function getWeekRange(): { start: string; end: string } {
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
   return {
-    start: monday.toISOString().split('T')[0],
-    end: sunday.toISOString().split('T')[0],
+    start: localDate(monday),
+    end: localDate(sunday),
   };
 }
 
@@ -54,7 +63,7 @@ export const getTodayTool: Tool = {
     requiresConfirmation: false,
   },
   handler: async () => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = localDate();
     const events = await loadEvents();
     const todayEvents = events.filter(e => e.date === today);
     const dateStr = formatDate(today);
@@ -154,8 +163,8 @@ export const upcomingEventsTool: Tool = {
   },
   handler: async (input) => {
     const days = typeof input.days === 'number' ? input.days : 7;
-    const today = new Date().toISOString().split('T')[0];
-    const future = new Date(Date.now() + days * 86400000).toISOString().split('T')[0];
+    const today = localDate();
+    const future = localDate(new Date(Date.now() + days * 86400000));
     const events = await loadEvents();
     const upcoming = events.filter(e => e.date >= today && e.date <= future);
 
