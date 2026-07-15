@@ -4,6 +4,13 @@ export interface ToolDef {
   requiresConfirmation?: boolean;
 }
 
+export interface MemoryCandidate {
+  id: string;
+  content: string;
+  category: string;
+  createdAt: string;
+}
+
 export interface MemoryFact {
   id: string;
   content: string;

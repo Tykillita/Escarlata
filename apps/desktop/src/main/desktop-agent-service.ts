@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Agent, buildSystemPrompt, type ConfirmationResult } from '../../../../src/agent/core.js';
 import { createProvider } from '../../../../src/provider/provider.js';
-import { createTeam } from '../../../../src/agents/team.js';
+import { createTeam, historyToTranscript, type Team } from '../../../../src/agents/team.js';
 import { getConfigManager } from '../../../../src/config/manager.js';
 import { getMemoryStore } from '../../../../src/memory/store.js';
 import { getProviderAuthService, type OAuthProvider } from '../../../../src/provider/auth-service.js';
@@ -20,8 +20,12 @@ import { readdir, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { extname, join, relative, resolve } from 'node:path';
 import { readDirectives } from '../../../../src/tools/directives.js';
+import { setConversationSource } from '../../../../src/tools/conversations.js';
 import { Heartbeat } from '../../../../src/heartbeat/index.js';
 import { getNoticeBoard, type Notice } from '../../../../src/heartbeat/notices.js';
+import { createSTTProvider } from '../../../../src/voice/stt.js';
+import { convertToWav16k } from '../../../../src/voice/audio.js';
+import { DEFAULT_MODELS } from '../../../../src/config/models.js';
 
 type PendingConfirmation={resolve:(value:ConfirmationResult)=>void;timer:NodeJS.Timeout};
 type TelemetryCache={metrics:VitalMetric[];updatedAt:string};
@@ -38,12 +42,18 @@ export class DesktopAgentService {
   private removeAuthListener: (() => void) | null = null;
   private telemetryTimer: NodeJS.Timeout | null = null;
   private heartbeat: Heartbeat | null = null;
+  private team: Team | null = null;
   private readonly noticeBoard = getNoticeBoard();
   private noticeListener: ((notice: Notice) => void) | null = null;
   constructor(private readonly store:LocalStore,private readonly vault:SecretVault,private readonly emit:(event:Record<string,unknown>)=>void){this.localAuth=new LocalAuth(vault);}
   async init():Promise<void>{
     this.restoreWorkspaceConfiguration();
     this.migrateHeartWorkspace();
+    // Amatista lee conversaciones reales del SQLite local, no del legado JSON.
+    setConversationSource({
+      list:()=>this.store.listConversations(),
+      read:(id)=>{const messages=this.store.loadConversation(id);return messages.length?messages:null;},
+    });
     this.unlocked=this.localAuth.restoreSession();
     const manager=getConfigManager();await manager.load();const config=manager.get();
     // Move credentials written by older versions out of JSON on the first desktop launch.
@@ -51,7 +61,8 @@ export class DesktopAgentService {
     if(Object.keys(config.apiKeys).length){ await manager.set('apiKeys',{}); }
     const selected=await this.resolveStartupProvider(config);
     const provider=selected.provider;
-    const team=createTeam({getProvider:()=>this.agent?.getProvider()??provider,getConfirmationGate:()=>this.confirm,getSafetyRuleResolver:()=>action=>manager.getRule(action),onToolEvent:event=>this.emit({type:'tool_event',sub:event.type,name:event.name,input:event.input,result:event.result,duration:event.duration})});
+    const team=createTeam({getProvider:()=>this.agent?.getProvider()??provider,getConfirmationGate:()=>this.confirm,getSafetyRuleResolver:()=>action=>manager.getRule(action),onToolEvent:event=>this.emit({type:'tool_event',sub:event.type,name:event.name,input:event.input,result:event.result,duration:event.duration}),onMemoryCandidates:candidates=>{const inserted=this.store.addMemoryCandidates(candidates,this.conversationId);if(inserted)this.emitMemoryCandidates();}});
+    this.team=team;
     this.agent=new Agent({provider,toolRegistry:team.registry,systemPrompt:buildSystemPrompt(team.registry,{surface:'chat'}),confirmationGate:this.confirm,onToolEvent:event=>this.emit({type:'tool_event',sub:event.type,name:event.name,input:event.input,result:event.result,duration:event.duration}),safetyRuleResolver:action=>manager.getRule(action)});
     this.agent.setProvider(provider,selected.name,selected.model);
     await this.agent.init();
@@ -88,8 +99,7 @@ export class DesktopAgentService {
     }
     for(const name of ['anthropic','openai'] as const){
       const status=await this.providerAuth.getStatus(name);if(status.state==='connected'){
-        const model=name==='anthropic'?'claude-sonnet-5-20260512':'gpt-5.4';
-        const chosen=await usable(name,model);if(chosen)return chosen;
+        const chosen=await usable(name,DEFAULT_MODELS[name]);if(chosen)return chosen;
       }
     }
     const local=await getInstalledOllamaModels();
@@ -102,14 +112,16 @@ export class DesktopAgentService {
     if(setup?.vaultDirectory) process.env.OBSIDIAN_VAULT=setup.vaultDirectory;
     if(setup?.directivesFile) process.env.ESCARLATA_DIRECTIVES_FILE=setup.directivesFile;
   }
-  private setHeartEnvironment(heart:string):void{Object.assign(process.env,{CONFIG_FILE:join(heart,'config.json'),MEMORY_FILE:join(heart,'memories.json'),NOTES_DIR:join(heart,'notes'),CALENDAR_FILE:join(heart,'calendar.json'),SCHEDULE_FILE:join(heart,'schedule.json'),ESCARLATA_DATA_DIR:heart});}
+  // Debe cubrir TODO archivo con env-override propio: cualquier variable ya seteada
+  // (p. ej. NOTICES_FILE en createWindow) le ganaría al fallback ESCARLATA_DATA_DIR.
+  private setHeartEnvironment(heart:string):void{Object.assign(process.env,{CONFIG_FILE:join(heart,'config.json'),MEMORY_FILE:join(heart,'memories.json'),NOTES_DIR:join(heart,'notes'),CALENDAR_FILE:join(heart,'calendar.json'),SCHEDULE_FILE:join(heart,'schedule.json'),NOTICES_FILE:join(heart,'notices.json'),REMINDERS_FILE:join(heart,'reminders.json'),AUDIT_FILE:join(heart,'audit.log'),ESCARLATA_DATA_DIR:heart});}
   private migrateHeartWorkspace():void{
     const setup=this.store.setting<OnboardingWorkspace>('onboarding');const vault=setup?.vaultDirectory;
     if(!vault)return;
     const heart=join(resolve(vault),'heart');const userData=process.env.ESCARLATA_BOOTSTRAP_DIR||'';
     if(resolve(this.store.filePath())!==resolve(join(heart,'escarlata.db'))){
       mkdirSync(heart,{recursive:true});
-      for(const name of ['config.json','memories.json','calendar.json','schedule.json','notices.json','audit.log','plan-vitals.json']){
+      for(const name of ['config.json','memories.json','calendar.json','schedule.json','notices.json','reminders.json','audit.log','plan-vitals.json']){
         const source=join(userData,name),target=join(heart,name);if(existsSync(source)&&!existsSync(target))cpSync(source,target);
       }
       const notes=join(userData,'notes');if(existsSync(notes)&&!existsSync(join(heart,'notes')))cpSync(notes,join(heart,'notes'),{recursive:true});
@@ -163,8 +175,15 @@ export class DesktopAgentService {
   }
   private cachedTelemetry(provider:VitalsProvider):TelemetryCache|undefined{return this.store.setting<TelemetryCache>(`telemetry:${provider}`);}
   private cachedUsageStats():UsageStatsCache|undefined{return this.store.setting<UsageStatsCache>('usageStatsCache');}
-  private async sendState():Promise<void>{const config=getConfigManager().get();const auth={...this.localAuth.status(),windowsHelloAvailable:false,unlocked:this.unlocked};const anthropicCache=this.cachedTelemetry('anthropic');const openAICache=this.cachedTelemetry('openai');const statsCache=this.cachedUsageStats();this.emit({type:'auth_ok'});this.emit({type:'state',desktop:true,profile:this.store.profile(),auth,onboarding:this.store.setting('onboarding')||{completed:false},defaultVaultDirectory:process.env.DEFAULT_VAULT_DIR||'vault',modelsDir:this.modelsDirectory(),history:this.agent.getHistory(),tools:this.agent.getToolDefinitions(),config:{...config,apiKeys:{}},facts:await getMemoryStore().getAll(),conversations:this.store.listConversations(),currentConvId:this.conversationId,vitalsByProvider:{anthropic:anthropicCache?.metrics||null,openai:openAICache?.metrics||null},telemetryCache:{anthropic:anthropicCache?.updatedAt,openai:openAICache?.updatedAt},usageStats:statsCache?.days||[]});void windowsHelloAvailable().then(available=>this.emit({type:'auth_state',...this.localAuth.status(),windowsHelloAvailable:available,unlocked:this.unlocked}));}
+  private async sendState():Promise<void>{const config=getConfigManager().get();const auth={...this.localAuth.status(),windowsHelloAvailable:false,unlocked:this.unlocked};const anthropicCache=this.cachedTelemetry('anthropic');const openAICache=this.cachedTelemetry('openai');const statsCache=this.cachedUsageStats();this.emit({type:'auth_ok'});this.emit({type:'state',desktop:true,profile:this.store.profile(),auth,onboarding:this.store.setting('onboarding')||{completed:false},defaultVaultDirectory:process.env.DEFAULT_VAULT_DIR||'vault',modelsDir:this.modelsDirectory(),history:this.agent.getHistory(),tools:this.agent.getToolDefinitions(),config:{...config,apiKeys:{}},facts:await getMemoryStore().getAll(),memoryCandidates:this.store.listMemoryCandidates(),conversations:this.store.listConversations(),currentConvId:this.conversationId,chatFolders:this.store.setting('chatFolders')||{folders:[],assign:{}},vitalsByProvider:{anthropic:anthropicCache?.metrics||null,openai:openAICache?.metrics||null},telemetryCache:{anthropic:anthropicCache?.updatedAt,openai:openAICache?.updatedAt},usageStats:statsCache?.days||[]});void windowsHelloAvailable().then(available=>this.emit({type:'auth_state',...this.localAuth.status(),windowsHelloAvailable:available,unlocked:this.unlocked}));}
   private async emitNotices(): Promise<void> { this.emit({ type: 'notices', active: await this.noticeBoard.getActive(), all: await this.noticeBoard.getAll() }); }
+  private emitMemoryCandidates(): void { this.emit({ type: 'memory_candidates', candidates: this.store.listMemoryCandidates() }); }
+  /** Análisis Amatista en background sobre la conversación al abandonarla (cambio de chat, chat nuevo, cierre). */
+  private analyzeCurrentConversation(): void {
+    const history = this.agent?.getHistory() ?? [];
+    if (history.length < 2) return;
+    this.team?.analyzeConversation(historyToTranscript(history));
+  }
   private telemetryPlaceholder(provider: VitalsProvider, status: string): VitalMetric[] {
     const label=provider==='openai'?'CHATGPT':'CLAUDE';
     return [
@@ -195,29 +214,88 @@ export class DesktopAgentService {
     }
     try{const days=await this.usageStats.refresh();const updatedAt=new Date().toISOString();this.store.setSetting('usageStatsCache',{days,updatedAt} satisfies UsageStatsCache);this.emit({type:'usage_stats',days,cached:false,updatedAt});}catch{/* Usage history is supplementary to account metrics. */}
   }
+  /** Voz push-to-talk: webm/opus del renderer -> WAV 16k (ffmpeg) -> whisper local -> turno normal. */
+  private async handleAudio(data:string,mime?:string):Promise<void>{
+    if(!this.unlocked){this.emit({type:'error',code:'AUTH_REQUIRED',message:'Inicia sesión para usar Escarlata.'});return;}
+    if(this.active){this.emit({type:'error',code:'TURN_ACTIVE',message:'Ya hay una respuesta en curso.'});return;}
+    try{
+      const audio=Buffer.from(data,'base64');
+      if(!audio.length)throw new Error('El audio llegó vacío.');
+      const ext=/ogg/i.test(mime||'')?'ogg':/wav/i.test(mime||'')?'wav':/mp4|m4a|aac/i.test(mime||'')?'m4a':'webm';
+      const wav=await convertToWav16k(audio,ext);
+      const stt=createSTTProvider('whisper');
+      let text='';
+      for await(const part of stt.transcribe(wav,'audio/wav'))text+=part;
+      text=text.trim();
+      if(!text)throw new Error('No se entendió nada en el audio. Intenta de nuevo.');
+      this.emit({type:'transcript',text});
+      await this.runTurn(text);
+    }catch(error){
+      this.emit({type:'error',code:'VOICE_FAILED',message:error instanceof Error?error.message:'No se pudo transcribir el audio.'});
+    }
+  }
+  /** Prueba mínima de credencial: pide un token y cancela el stream. Devuelve el error o null si funciona. */
+  private async probeProvider(provider:Provider):Promise<string|null>{
+    try{
+      const iterator=provider.complete([
+        {role:'system',content:'Prueba de conexión. Responde solo "ok".'},
+        {role:'user',content:'ok'},
+      ])[Symbol.asyncIterator]();
+      const timeout=new Promise<never>((_,reject)=>setTimeout(()=>reject(new Error('El proveedor no respondió en 15 segundos.')),15_000));
+      await Promise.race([iterator.next(),timeout]);
+      await iterator.return?.(undefined);
+      return null;
+    }catch(error){
+      return error instanceof Error?error.message:'No se pudo validar la credencial.';
+    }
+  }
   private async runTurn(content:string):Promise<void>{if(!this.unlocked){this.emit({type:'error',code:'AUTH_REQUIRED',message:'Inicia sesión para usar Escarlata.'});return;}if(this.active){this.emit({type:'error',code:'TURN_ACTIVE',message:'Ya hay una respuesta en curso.'});return;}this.active=true;let full='';try{for await(const token of this.agent.processTurn(content)){full+=token;this.emit({type:'token',token});}this.store.saveConversation(this.conversationId,this.agent.getHistory());this.emit({type:'response',content:full});this.emit({type:'conversations',list:this.store.listConversations(),currentConvId:this.conversationId});this.emit({type:'memories',facts:await getMemoryStore().getAll()});}catch(error){this.emit({type:'error',code:'TURN_FAILED',message:error instanceof Error?error.message:String(error)});}finally{this.active=false;}}
   async command(command:DesktopCommand):Promise<void>{switch(command.type){
     case 'message':return this.runTurn(command.content);
+    case 'audio':return this.handleAudio(command.data,command.mime);
     case 'confirm':{const pending=this.pending.get(command.id);if(pending){clearTimeout(pending.timer);this.pending.delete(command.id);pending.resolve(command.decision);this.emit({type:'confirm_result',id:command.id,decision:command.decision});}return;}
     case 'abort':this.agent.stop();this.emit({type:'aborted'});return;
     case 'get_state':await this.sendState();void this.refreshWorkspaceState();return;
     case 'get_notices': return this.emitNotices();
     case 'dismiss_notice': { const dismissed = await this.noticeBoard.dismiss(command.id); if (dismissed) this.emit({ type: 'notice_dismissed', id: command.id }); return; }
     case 'set_heartbeat': if (command.paused) this.heartbeat?.pause(); else this.heartbeat?.resume(); return;
-    case 'new_chat':this.conversationId=randomUUID();this.agent.clearHistory();this.emit({type:'history_cleared'});this.emit({type:'greeting',content:'¡Hola! ¿En qué puedo ayudarte hoy?'});return;
-    case 'switch_chat':this.conversationId=command.id;this.agent.restoreHistory(this.store.loadConversation(command.id));return this.sendState();
+    case 'new_chat':this.analyzeCurrentConversation();this.conversationId=randomUUID();this.agent.clearHistory();this.emit({type:'history_cleared'});this.emit({type:'greeting',content:'¡Hola! ¿En qué puedo ayudarte hoy?'});return;
+    case 'switch_chat':this.analyzeCurrentConversation();this.conversationId=command.id;this.agent.restoreHistory(this.store.loadConversation(command.id));return this.sendState();
     case 'delete_conversation':this.store.deleteConversation(command.id);if(command.id===this.conversationId){this.conversationId=randomUUID();this.agent.clearHistory();}this.emit({type:'conversations',list:this.store.listConversations(),currentConvId:this.conversationId});return;
     case 'rename_conversation':this.store.renameConversation(command.id,command.title);this.emit({type:'conversations',list:this.store.listConversations(),currentConvId:this.conversationId});return;
     case 'clear_history':this.agent.clearHistory();this.store.saveConversation(this.conversationId,[]);this.emit({type:'history_cleared'});return;
+    case 'edit_message':{
+      if(this.active){this.emit({type:'error',code:'TURN_ACTIVE',message:'Espera a que termine la respuesta en curso antes de editar.'});return;}
+      const history=this.agent.getHistory();
+      // El userIndex cuenta solo inicios de turno del usuario (content string);
+      // los tool_result también llegan con role user pero como bloques.
+      let seen=0,cut=-1;
+      for(let i=0;i<history.length;i++){const m=history[i];if(m.role==='user'&&typeof m.content==='string'){if(seen===command.userIndex){cut=i;break;}seen++;}}
+      if(cut===-1){this.emit({type:'error',code:'EDIT_TARGET_NOT_FOUND',message:'No encontré el mensaje a editar. Recarga la conversación.'});return;}
+      this.agent.restoreHistory(history.slice(0,cut));
+      this.store.saveConversation(this.conversationId,this.agent.getHistory());
+      return this.runTurn(command.content);
+    }
+    case 'set_chat_folders':{
+      const folders={folders:command.folders,assign:command.assign};
+      this.store.setSetting('chatFolders',folders);
+      this.emit({type:'chat_folders',...folders});return;
+    }
     case 'get_memories':this.emit({type:'memories',facts:await getMemoryStore().getAll()});return;
     case 'get_vault_files':return this.refreshWorkspaceState();
     case 'get_directives':this.emit({type:'directives',items:await readDirectives()});return;
     case 'delete_memory':await getMemoryStore().remove(command.id);this.emit({type:'memories',facts:await getMemoryStore().getAll()});return;
+    case 'get_memory_candidates':return this.emitMemoryCandidates();
+    case 'review_memory_candidate':{
+      const candidate=this.store.reviewMemoryCandidate(command.id,command.decision);
+      if(candidate&&command.decision==='approved'){await getMemoryStore().add(candidate.content,candidate.category);this.emit({type:'memories',facts:await getMemoryStore().getAll()});}
+      this.emitMemoryCandidates();return;
+    }
     case 'set_provider':{
       const manager=getConfigManager();
-      if(command.apiKey) this.vault.set(command.provider,command.apiKey);
+      // La key candidata NO se persiste todavía: primero se valida contra el proveedor.
+      const candidateKey=command.apiKey||this.vault.get(command.provider);
       const remoteProvider=['anthropic','openai','openrouter','nvidia'].includes(command.provider);
-      const credentialConfigured=Boolean(this.vault.get(command.provider));
       if(command.authMethod==='oauth_local'){
         if(command.provider!=='anthropic'&&command.provider!=='openai'){
           this.emit({type:'error',code:'OAUTH_UNSUPPORTED',message:'Este proveedor solo admite API key en Escarlata.'});return;
@@ -227,10 +305,18 @@ export class DesktopAgentService {
         if(status.state!=='connected'){
           this.emit({type:'error',code:'PROVIDER_AUTH_REQUIRED',message:'Conecta la cuenta antes de activar este proveedor.'});return;
         }
-      }else if(remoteProvider&&!credentialConfigured){
+      }else if(remoteProvider&&!candidateKey){
         this.emit({type:'error',code:'PROVIDER_CREDENTIAL_REQUIRED',message:'Introduce una API key antes de activar este proveedor.'});return;
       }
-      const provider=createProvider({provider:command.provider,model:command.model,apiKey:this.vault.get(command.provider),authMethod:command.authMethod});
+      let provider:Provider;
+      try{provider=createProvider({provider:command.provider,model:command.model,apiKey:candidateKey,authMethod:command.authMethod});}
+      catch(error){this.emit({type:'error',code:'PROVIDER_INVALID',message:error instanceof Error?error.message:'No se pudo configurar el proveedor.'});return;}
+      if(remoteProvider&&command.authMethod==='api_key'&&command.apiKey){
+        const probeError=await this.probeProvider(provider);
+        if(probeError){this.emit({type:'error',code:'PROVIDER_VALIDATION_FAILED',message:`La API key no funcionó: ${probeError}`});return;}
+      }
+      if(command.apiKey) this.vault.set(command.provider,command.apiKey);
+      const credentialConfigured=Boolean(this.vault.get(command.provider));
       this.agent.setProvider(provider,command.provider,command.model);
       await manager.set('modelProvider',command.provider); await manager.set('modelName',command.model);
       await manager.set('authMethods',{...manager.get().authMethods,[command.provider]:command.authMethod});
@@ -329,5 +415,5 @@ export class DesktopAgentService {
     default:this.emit({type:'error',code:'NOT_IMPLEMENTED',message:`El comando ${command.type} aún no está disponible en desktop.`});
   }}
   denyPendingConfirmations():void{for(const pending of this.pending.values()){clearTimeout(pending.timer);pending.resolve('denied');}this.pending.clear();}
-  dispose():void{this.denyPendingConfirmations();this.removeAuthListener?.();this.removeAuthListener=null;if(this.telemetryTimer)clearInterval(this.telemetryTimer);this.telemetryTimer=null;this.heartbeat?.stop();this.heartbeat=null;if(this.noticeListener)this.noticeBoard.off('added',this.noticeListener);this.noticeListener=null;}
+  dispose():void{this.analyzeCurrentConversation();this.denyPendingConfirmations();this.removeAuthListener?.();this.removeAuthListener=null;if(this.telemetryTimer)clearInterval(this.telemetryTimer);this.telemetryTimer=null;this.heartbeat?.stop();this.heartbeat=null;if(this.noticeListener)this.noticeBoard.off('added',this.noticeListener);this.noticeListener=null;}
 }

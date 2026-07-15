@@ -8,9 +8,11 @@ import type { Message } from '../../../../src/provider/types.js';
 export interface LocalProfile { id:string; displayName:string; deviceId:string; firebaseUid?:string|null; lastSyncAt?:string|null }
 export interface ConversationSummary { id:string; title:string; createdAt:string; updatedAt:string; messageCount:number }
 export interface SyncConversation extends ConversationSummary { messages:{id:string;role:string;content:unknown;createdAt:string;sequence:number}[] }
+export interface MemoryCandidateRow { id:string; content:string; category:string; sourceConversationId?:string|null; createdAt:string }
 type Row=Record<string, unknown>;
 
 export class LocalStore {
+  private flushTimer:NodeJS.Timeout|null=null;
   private constructor(private readonly db:Database,private file:string){}
   static async open(file:string):Promise<LocalStore>{
     mkdirSync(dirname(file),{recursive:true});
@@ -33,7 +35,10 @@ export class LocalStore {
       CREATE TABLE IF NOT EXISTS sync_conflicts (id TEXT PRIMARY KEY, entity TEXT NOT NULL, entity_id TEXT NOT NULL, local_json TEXT NOT NULL, remote_json TEXT NOT NULL, created_at TEXT NOT NULL, resolved_at TEXT);`);store.flush();return store;
   }
   private rows(sql:string,params:SqlValue[]=[]):Row[]{const result=this.db.exec(sql,params);if(!result[0])return[];const {columns,values}=result[0];return values.map(value=>Object.fromEntries(columns.map((column,index)=>[column,value[index]])));}
-  private flush():void{writeFileSync(this.file,Buffer.from(this.db.export()));}
+  // sql.js exporta la base ENTERA en cada write; el debounce colapsa ráfagas
+  // (guardar una conversación = decenas de INSERT) en una sola escritura a disco.
+  private flush():void{if(this.flushTimer)return;this.flushTimer=setTimeout(()=>{this.flushTimer=null;this.flushNow();},300);}
+  private flushNow():void{if(this.flushTimer){clearTimeout(this.flushTimer);this.flushTimer=null;}writeFileSync(this.file,Buffer.from(this.db.export()));}
   profile():LocalProfile{const row=this.rows('SELECT id,display_name AS displayName,device_id AS deviceId,firebase_uid AS firebaseUid,last_sync_at AS lastSyncAt FROM profiles LIMIT 1')[0] as unknown as LocalProfile|undefined;if(row)return row;const p:LocalProfile={id:randomUUID(),displayName:process.env.USERNAME||'Usuario',deviceId:randomUUID()};this.db.run('INSERT INTO profiles(id,display_name,device_id,created_at) VALUES(?,?,?,?)',[p.id,p.displayName,p.deviceId,new Date().toISOString()]);this.flush();return p;}
   linkFirebase(uid:string):LocalProfile{this.db.run('UPDATE profiles SET firebase_uid=?',[uid]);this.flush();return this.profile();}
   updateProfileName(name:string):LocalProfile{this.db.run('UPDATE profiles SET display_name=?',[name.trim().slice(0,80)]);this.flush();return this.profile();}
@@ -44,10 +49,26 @@ export class LocalStore {
   deleteConversation(id:string):void{this.db.run('DELETE FROM messages WHERE conversation_id=?',[id]);this.db.run('DELETE FROM conversations WHERE id=?',[id]);this.flush();}
   renameConversation(id:string,title:string):void{this.db.run('UPDATE conversations SET title=?,updated_at=? WHERE id=?',[title.slice(0,500),new Date().toISOString(),id]);this.flush();}
   syncConversations():SyncConversation[]{return this.listConversations().map(conversation=>({...conversation,messages:this.rows('SELECT id,role,content_json AS contentJson,created_at AS createdAt,sequence FROM messages WHERE conversation_id=? ORDER BY sequence',[conversation.id]).map(row=>({id:String(row.id),role:String(row.role),content:JSON.parse(String(row.contentJson)),createdAt:String(row.createdAt),sequence:Number(row.sequence)}))}));}
+  /** Propuestas de Amatista pendientes de revisión. Devuelve cuántas se insertaron (deduplica por contenido pendiente). */
+  addMemoryCandidates(candidates:{content:string;category:string}[],conversationId?:string):number{
+    const now=new Date().toISOString();let inserted=0;
+    for(const candidate of candidates){
+      const content=candidate.content.trim().slice(0,500);if(!content)continue;
+      if(this.rows('SELECT id FROM memory_candidates WHERE content=? AND reviewed_at IS NULL',[content]).length)continue;
+      this.db.run('INSERT INTO memory_candidates(id,content,category,source_conversation_id,created_at) VALUES(?,?,?,?,?)',[randomUUID(),content,candidate.category.slice(0,60)||'general',conversationId||null,now]);inserted++;
+    }
+    if(inserted)this.flush();return inserted;
+  }
+  listMemoryCandidates():MemoryCandidateRow[]{return this.rows('SELECT id,content,category,source_conversation_id AS sourceConversationId,created_at AS createdAt FROM memory_candidates WHERE reviewed_at IS NULL ORDER BY created_at DESC') as unknown as MemoryCandidateRow[];}
+  reviewMemoryCandidate(id:string,decision:'approved'|'rejected'):MemoryCandidateRow|undefined{
+    const row=this.rows('SELECT id,content,category,source_conversation_id AS sourceConversationId,created_at AS createdAt FROM memory_candidates WHERE id=? AND reviewed_at IS NULL',[id])[0] as unknown as MemoryCandidateRow|undefined;
+    if(!row)return;
+    this.db.run('UPDATE memory_candidates SET reviewed_at=?,decision=? WHERE id=?',[new Date().toISOString(),decision,id]);this.flush();return row;
+  }
   setting<T>(key:string):T|undefined{const row=this.rows('SELECT value_json FROM settings WHERE key=?',[key])[0];if(!row)return;return JSON.parse(String(row.value_json)) as T;}
   setSetting(key:string,value:unknown):void{this.db.run('INSERT INTO settings(key,value_json,updated_at) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at',[key,JSON.stringify(value),new Date().toISOString()]);this.flush();}
   filePath():string{return this.file;}
-  relocate(file:string):void{const target=join(file);if(this.file===target)return;mkdirSync(dirname(target),{recursive:true});this.file=target;this.flush();}
+  relocate(file:string):void{const target=join(file);if(this.file===target)return;mkdirSync(dirname(target),{recursive:true});this.file=target;this.flushNow();}
   /** Imports legacy JSON once, retaining source files untouched as a fallback. */
   importLegacy(dataDirectory:string):{imported:number;skipped:boolean;errors:string[]}{
     if(this.rows("SELECT value_json FROM settings WHERE key='legacy_import_v1'").length)return{imported:0,skipped:true,errors:[]};
@@ -59,6 +80,6 @@ export class LocalStore {
     }catch(error){errors.push(`${file}: ${error instanceof Error?error.message:String(error)}`);}
     this.db.run("INSERT INTO settings(key,value_json,updated_at) VALUES('legacy_import_v1',?,?)",[JSON.stringify({imported,errors}),new Date().toISOString()]);this.flush();return{imported,skipped:false,errors};
   }
-  close():void{this.flush();this.db.close();}
+  close():void{this.flushNow();this.db.close();}
 }
 export const defaultDatabasePath=(userData:string)=>join(userData,'escarlata.db');

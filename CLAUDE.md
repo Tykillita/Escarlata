@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Escarlata is a warm, casual voice-first AI assistant (personal/team use). Despite `AGENT.md` describing
+Escarlata is a warm, casual voice-first AI assistant (personal/team use). Despite `docs/VISION.md` describing
 the backend as Go, the actual implementation is **Node/TypeScript** — `cmd/`, `internal/`, `pkg/` are
 empty leftover Go scaffolding and can be ignored. The real backend lives in `src/`, and there's a
-separate React frontend in `ui/`. Treat `AGENT.md` as the original product spec/vision (tiers, safety
+separate React frontend in `ui/`. Treat `docs/VISION.md` as the original product spec/vision (tiers, safety
 rules, personality) rather than a literal description of the current stack.
 
 ## Commands

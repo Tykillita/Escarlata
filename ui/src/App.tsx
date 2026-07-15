@@ -13,7 +13,7 @@ import { PerspectiveGrid } from './components/PerspectiveGrid';
 import { TerminalOverlay, TOOL_NOTICE_MS } from './components/TerminalOverlay';
 import { ChatPage } from './components/ChatPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import type { Message, ToolDef, MemoryFact, Notice, EscarlataConfig, WsMessage, VaultFile, DirectiveItem, Conversation, VitalMetric, VitalsProvider, VitalsByProvider, UsageStatsDay, SystemStatus, LinkStatus, OllamaModelInfo, LocalModelFile, ChatFolderState, AuthMethod, ProviderAuthStatus, DesktopPreferences } from './types';
+import type { Message, ToolDef, MemoryFact, MemoryCandidate, Notice, EscarlataConfig, WsMessage, VaultFile, DirectiveItem, Conversation, VitalMetric, VitalsProvider, VitalsByProvider, UsageStatsDay, SystemStatus, LinkStatus, OllamaModelInfo, LocalModelFile, ChatFolderState, AuthMethod, ProviderAuthStatus, DesktopPreferences } from './types';
 import type { ToolActivity } from './components/TerminalOverlay';
 import { ModelConfigPanel } from './components/ModelConfigPanel';
 import { SyncSettings } from './components/SyncSettings';
@@ -61,6 +61,7 @@ export default function App() {
   const [tools, setTools] = useState<ToolDef[]>([]);
   const [config, setConfig] = useState<EscarlataConfig | null>(null);
   const [facts, setFacts] = useState<MemoryFact[]>([]);
+  const [memoryCandidates, setMemoryCandidates] = useState<MemoryCandidate[]>([]);
   const [vaultFiles, setVaultFiles] = useState<VaultFile[]>([]);
   const [directives, setDirectives] = useState<DirectiveItem[]>([]);
   const [vitalsProvider, setVitalsProvider] = useState<VitalsProvider>(() => localStorage.getItem('escarlata_vitals_provider') === 'openai' ? 'openai' : 'anthropic');
@@ -72,7 +73,6 @@ export default function App() {
   const [currentConvId, setCurrentConvId] = useState<string>('');
   // null hasta que el servidor manda su estado — evita migrar/sobrescribir antes de tiempo
   const [chatFolders, setChatFolders] = useState<ChatFolderState | null>(null);
-  const [pushKey, setPushKey] = useState('');
   const [toolActivities, setToolActivities] = useState<ToolActivity[]>([]);
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({
     provider: 'ollama', model: 'qwen2.5:7b',
@@ -165,6 +165,7 @@ export default function App() {
       if (msg.tools) setTools(msg.tools as ToolDef[]);
       if (msg.config) setConfig(msg.config as EscarlataConfig);
       if (msg.facts) setFacts(msg.facts as MemoryFact[]);
+      if (msg.memoryCandidates) setMemoryCandidates(msg.memoryCandidates as MemoryCandidate[]);
       if (msg.vaultFiles) setVaultFiles(msg.vaultFiles as VaultFile[]);
       if (msg.directives) setDirectives(msg.directives as DirectiveItem[]);
       if (msg.vitalsByProvider) setVitalsByProvider(msg.vitalsByProvider as VitalsByProvider);
@@ -180,7 +181,6 @@ export default function App() {
       if (msg.conversations) setConversations(msg.conversations as Conversation[]);
       if (msg.currentConvId) setCurrentConvId(msg.currentConvId as string);
       if (msg.chatFolders) setChatFolders(msg.chatFolders as ChatFolderState);
-      if (msg.pushKey) setPushKey(msg.pushKey as string);
       if (msg.profile) setLocalProfile(msg.profile as typeof localProfile);
       if (msg.auth) setAuthState(msg.auth as typeof authState);
       if (msg.onboarding) setOnboarding(msg.onboarding as typeof onboarding);
@@ -264,6 +264,9 @@ export default function App() {
     confirm_result: () => setPendingConfirm(null),
     memories: (msg: WsMessage) => {
       if (msg.facts) setFacts(msg.facts as MemoryFact[]);
+    },
+    memory_candidates: (msg: WsMessage) => {
+      if (msg.candidates) setMemoryCandidates(msg.candidates as MemoryCandidate[]);
     },
     error: (msg: WsMessage) => {
       setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: 'assistant', content: `⚠ Error: ${msg.message}`, timestamp: new Date().toISOString() }]);
@@ -480,18 +483,22 @@ export default function App() {
     send({ type: 'set_chat_folders', folders: next.folders, assign: next.assign });
   }, [send]);
 
-  const handleEditMessage = useCallback((_messageId: string, _newContent: string) => {
-    // Update the message locally and send to server
+  const handleEditMessage = useCallback((messageId: string, newContent: string) => {
+    const idx = messages.findIndex(m => m.id === messageId);
+    if (idx === -1) return;
+    // Ordinal del mensaje entre los turnos de usuario: es lo único que el
+    // backend puede mapear a su historial (los ids del renderer son locales).
+    const userIndex = messages.slice(0, idx).filter(m => m.role === 'user' && m.content.trim()).length;
+    // Truncado optimista local; el backend re-genera desde ese punto.
     setMessages(prev => {
-      const idx = prev.findIndex(m => m.id === _messageId);
-      if (idx === -1) return prev;
-      const updated = prev.slice(0, idx);
-      // Remove all messages after the edited one (the assistant response)
+      const cut = prev.findIndex(m => m.id === messageId);
+      if (cut === -1) return prev;
+      const updated = prev.slice(0, cut);
       setStreamingId(`stream-${Date.now()}`);
       updated.push({
         id: `msg-${Date.now()}`,
         role: 'user',
-        content: _newContent,
+        content: newContent,
         timestamp: new Date().toISOString(),
       });
       updated.push({
@@ -503,8 +510,8 @@ export default function App() {
       });
       return updated;
     });
-    send({ type: 'edit_message', messageId: _messageId, content: _newContent });
-  }, [send]);
+    send({ type: 'edit_message', userIndex, content: newContent });
+  }, [messages, send]);
 
   const handleSetProvider = useCallback((provider: string, model: string, authMethod: AuthMethod, apiKey?: string) => {
     send({ type: 'set_provider', provider, model, authMethod, apiKey });
@@ -613,9 +620,6 @@ export default function App() {
           connected={connected}
           notices={notices}
           onDismissNotice={(id) => send({ type: 'dismiss_notice', id })}
-          pushKey={pushKey}
-          onPushSubscribe={(subscription) => send({ type: 'push_subscribe', subscription })}
-          onPushUnsubscribe={(endpoint) => send({ type: 'push_unsubscribe', endpoint })}
         />
       </ErrorBoundary>
       {showModelConfig && (
@@ -670,6 +674,8 @@ export default function App() {
             localStorage.setItem('escarlata_vitals_provider', provider);
           }}
           onDeleteMemory={(id) => send({ type: 'delete_memory', id })}
+          memoryCandidates={memoryCandidates}
+          onReviewCandidate={(id, decision) => send({ type: 'review_memory_candidate', id, decision })}
           onOpenChat={() => setChatPageOpen(true)}
           onOpenProviders={() => setShowModelConfig(true)}
           onOpenSync={() => setShowSyncSettings(true)}

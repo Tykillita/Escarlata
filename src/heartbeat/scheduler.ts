@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { dataPath } from '../config/paths.js';
 
 export interface CheckSchedule {
   id: string;
@@ -13,10 +14,8 @@ export interface CheckSchedule {
   enabled: boolean;
 }
 
-const SCHEDULE_FILE = process.env.SCHEDULE_FILE || path.join(process.cwd(), 'data', 'schedule.json');
-
 function getSchedulePath(): string {
-  return process.env.SCHEDULE_FILE || path.join(process.cwd(), 'data', 'schedule.json');
+  return process.env.SCHEDULE_FILE || dataPath('schedule.json');
 }
 
 function parseNextRun(interval: string | number): Date {

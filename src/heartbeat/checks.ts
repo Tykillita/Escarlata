@@ -13,10 +13,9 @@ export interface HeartbeatCheck {
 /** Time-of-day greeting based on the local hour. (Icons are SVG, UI-side.) */
 function timeGreeting(now: Date): { greeting: string } {
   const h = now.getHours();
-  if (h >= 5 && h < 12) return { greeting: 'Good morning' };
-  if (h >= 12 && h < 18) return { greeting: 'Good afternoon' };
-  if (h >= 18 && h < 22) return { greeting: 'Good evening' };
-  return { greeting: 'Good night' };
+  if (h >= 5 && h < 12) return { greeting: 'Buenos días' };
+  if (h >= 12 && h < 20) return { greeting: 'Buenas tardes' };
+  return { greeting: 'Buenas noches' };
 }
 
 /**
@@ -45,8 +44,8 @@ export const startupBriefingCheck: HeartbeatCheck = {
       try { return await tool.handler(args); } catch { return fallback; }
     };
 
-    const todaySummary = await run('get_today', {}, 'No events scheduled for today.');
-    const weekSummary = await run('get_week', {}, 'No events this week.');
+    const todaySummary = await run('get_today', {}, 'Sin eventos agendados para hoy.');
+    const weekSummary = await run('get_week', {}, 'Sin eventos esta semana.');
     const upcomingSummary = await run('upcoming_events', { days: 7 }, '');
     const reminders = await run('list_reminders', {}, '');
     const directives = await run('get_directives', {}, '');
@@ -54,24 +53,24 @@ export const startupBriefingCheck: HeartbeatCheck = {
     // Existing undismissed items (el briefing anterior se reemplaza, no cuenta)
     const existingNotices = (await notices.getActive()).filter(n => n.source !== 'startup_briefing');
     const followUp = existingNotices.length > 0
-      ? `\n${existingNotices.length} undismissed item(s):\n${existingNotices.map(n => `  - ${n.title}`).join('\n')}`
+      ? `\n${existingNotices.length} aviso(s) sin descartar:\n${existingNotices.map(n => `  - ${n.title}`).join('\n')}`
       : '';
 
     const body = [
       stamp.toUpperCase(),
       '',
-      `TODAY\n${todaySummary}`,
-      `\nWEEK\n${weekSummary}`,
+      `HOY\n${todaySummary}`,
+      `\nSEMANA\n${weekSummary}`,
       upcomingSummary ? `\n${upcomingSummary}` : '',
-      reminders && !/^No reminders/i.test(reminders) ? `\nREMINDERS\n${reminders}` : '',
-      directives && !/^No hay pendientes/i.test(directives) ? `\nDIRECTIVES\n${directives}` : '',
+      reminders && !/^No hay recordatorios/i.test(reminders) ? `\nRECORDATORIOS\n${reminders}` : '',
+      directives && !/^No hay pendientes/i.test(directives) ? `\nPENDIENTES\n${directives}` : '',
       followUp,
     ].filter(Boolean).join('\n');
 
     // Upsert: cada arranque reemplaza el briefing anterior en vez de apilar
     await notices.replaceBySource(
       'startup_briefing',
-      `${greeting}! Here's your intel`,
+      `${greeting}. Tu resumen del día`,
       body,
       'notice'
     );
@@ -99,8 +98,8 @@ export const followUpCheck: HeartbeatCheck = {
       // Upsert: un solo follow-up vivo, actualizado — no uno nuevo por hora
       await notices.replaceBySource(
         'follow_up',
-        'Following up',
-        `You still have ${stale.length} undismissed item(s) from earlier:\n${
+        'Sigue pendiente',
+        `Todavía tienes ${stale.length} aviso(s) sin descartar:\n${
           stale.map(n => `  - ${n.title}`).join('\n')
         }`,
         'info'
@@ -127,8 +126,8 @@ export const remindersCheck: HeartbeatCheck = {
       await store.markFired(r.id);
       const notices = getNoticeBoard();
       await notices.add(
-        `Reminder: ${r.message}`,
-        `You asked to be reminded about this. Time is up!`,
+        `Recordatorio: ${r.message}`,
+        `Pediste que te recordara esto. ¡Ya es la hora!`,
         'important',
         'reminders_check',
         [{ label: 'Posponer 10 min', command: `Recuérdame en 10 minutos: ${r.message}` }]

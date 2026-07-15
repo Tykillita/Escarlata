@@ -3,11 +3,14 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import { initializeApp, cert, App } from 'firebase-admin/app';
 import { getFirestore, Firestore, Query, DocumentData } from 'firebase-admin/firestore';
+import { dataPath } from '../config/paths.js';
 
 // Read-only Firestore access to external Firebase projects.
 // Drop service account JSON keys into data/firebase/ (one per project);
 // the project_id inside each file becomes the project name for the tools.
-const SA_DIR = process.env.FIREBASE_SA_DIR || path.join(process.cwd(), 'data', 'firebase');
+function getSaDir(): string {
+  return process.env.FIREBASE_SA_DIR || dataPath('firebase');
+}
 
 const apps: Map<string, App> = new Map();
 let loaded = false;
@@ -17,13 +20,13 @@ async function loadApps(): Promise<Map<string, App>> {
   loaded = true;
   let files: string[] = [];
   try {
-    files = (await fs.readdir(SA_DIR)).filter(f => f.endsWith('.json'));
+    files = (await fs.readdir(getSaDir())).filter(f => f.endsWith('.json'));
   } catch {
     return apps; // dir missing = no projects configured
   }
   for (const file of files) {
     try {
-      const raw = JSON.parse(await fs.readFile(path.join(SA_DIR, file), 'utf-8'));
+      const raw = JSON.parse(await fs.readFile(path.join(getSaDir(), file), 'utf-8'));
       if (raw.type !== 'service_account' || !raw.project_id) continue;
       const app = initializeApp({ credential: cert(raw) }, `escarlata-${raw.project_id}`);
       apps.set(raw.project_id, app);
@@ -37,7 +40,7 @@ async function loadApps(): Promise<Map<string, App>> {
 async function getDb(project: string): Promise<Firestore | string> {
   const all = await loadApps();
   if (all.size === 0) {
-    return `No hay proyectos Firebase configurados. Coloca los archivos JSON de service account en ${SA_DIR}.`;
+    return `No hay proyectos Firebase configurados. Coloca los archivos JSON de service account en ${getSaDir()}.`;
   }
   const app = all.get(project);
   if (!app) {
@@ -67,7 +70,7 @@ export const firebaseCollectionsTool: Tool = {
   handler: async (input) => {
     const all = await loadApps();
     if (all.size === 0) {
-      return `No hay proyectos Firebase configurados. Coloca los archivos JSON de service account en ${SA_DIR}.`;
+      return `No hay proyectos Firebase configurados. Coloca los archivos JSON de service account en ${getSaDir()}.`;
     }
     const project = input.project ? String(input.project) : '';
     if (!project) {

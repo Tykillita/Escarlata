@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { dataPath } from '../config/paths.js';
 
 export interface MemoryFact {
   id: string;
@@ -10,7 +11,7 @@ export interface MemoryFact {
 }
 
 function getMemoryFilePath(): string {
-  return process.env.MEMORY_FILE || path.join(process.cwd(), 'data', 'memories.json');
+  return process.env.MEMORY_FILE || dataPath('memories.json');
 }
 
 export class MemoryStore {

@@ -53,7 +53,8 @@ class WhisperLocalSTTProvider implements STTProvider {
       response = await fetch(`${this.baseUrl}/inference`, {
         method: 'POST',
         headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
-        body,
+        // Copia a Uint8Array<ArrayBuffer>: BodyInit no acepta Buffer bajo lib DOM
+        body: new Uint8Array(body),
       });
     } catch (err) {
       throw new Error(
@@ -90,7 +91,7 @@ class DeepgramSTTProvider implements STTProvider {
         'Authorization': `Token ${this.apiKey}`,
         'Content-Type': mimeType,
       },
-      body: audioBuffer,
+      body: new Uint8Array(audioBuffer),
     });
 
     if (!response.ok) {

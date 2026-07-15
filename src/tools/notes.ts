@@ -1,22 +1,25 @@
 import { Tool } from './registry.js';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import { dataPath } from '../config/paths.js';
 
-const NOTES_DIR = process.env.NOTES_DIR || path.join(process.cwd(), 'data', 'notes');
+function getNotesDir(): string {
+  return process.env.NOTES_DIR || dataPath('notes');
+}
 
 async function ensureDir() {
-  await fs.mkdir(NOTES_DIR, { recursive: true });
+  await fs.mkdir(getNotesDir(), { recursive: true });
 }
 
 async function getNotesPath(file: string): Promise<string> {
   // Sanitize: prevent path traversal
   const safe = file.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return path.join(NOTES_DIR, `${safe}.md`);
+  return path.join(getNotesDir(), `${safe}.md`);
 }
 
 async function listAllNotes(): Promise<string[]> {
   await ensureDir();
-  const files = await fs.readdir(NOTES_DIR);
+  const files = await fs.readdir(getNotesDir());
   return files.filter(f => f.endsWith('.md')).map(f => f.replace(/\.md$/, ''));
 }
 
@@ -39,7 +42,7 @@ export const saveNoteTool: Tool = {
     const timestamp = new Date().toISOString();
     const entry = `# ${title}\n> Created: ${timestamp}\n\n${content}\n`;
     await fs.writeFile(filePath, entry, 'utf-8');
-    return `Note "${title}" saved successfully.`;
+    return `Nota "${title}" guardada.`;
   },
 };
 
@@ -59,7 +62,7 @@ export const getNoteTool: Tool = {
       const content = await fs.readFile(filePath, 'utf-8');
       return content;
     } catch {
-      return `Note "${title}" not found. Available notes: ${(await listAllNotes()).join(', ') || 'none'}`;
+      return `No encontré la nota "${title}". Notas disponibles: ${(await listAllNotes()).join(', ') || 'ninguna'}`;
     }
   },
 };
@@ -73,8 +76,8 @@ export const listNotesTool: Tool = {
   },
   handler: async () => {
     const notes = await listAllNotes();
-    if (notes.length === 0) return 'No notes saved yet.';
-    return 'Available notes:\n' + notes.map(n => `- ${n}`).join('\n');
+    if (notes.length === 0) return 'Aún no hay notas guardadas.';
+    return 'Notas disponibles:\n' + notes.map(n => `- ${n}`).join('\n');
   },
 };
 
@@ -90,12 +93,12 @@ export const searchNotesTool: Tool = {
   handler: async (input) => {
     const query = String(input.query || '').toLowerCase();
     await ensureDir();
-    const files = await fs.readdir(NOTES_DIR);
+    const files = await fs.readdir(getNotesDir());
     const results: string[] = [];
 
     for (const file of files) {
       if (!file.endsWith('.md')) continue;
-      const content = await fs.readFile(path.join(NOTES_DIR, file), 'utf-8');
+      const content = await fs.readFile(path.join(getNotesDir(), file), 'utf-8');
       if (content.toLowerCase().includes(query)) {
         const title = file.replace(/\.md$/, '');
         // Find the matching snippet
@@ -105,7 +108,7 @@ export const searchNotesTool: Tool = {
       }
     }
 
-    if (results.length === 0) return `No notes found matching "${query}".`;
-    return `Found in ${results.length} note(s):\n${results.join('\n')}`;
+    if (results.length === 0) return `Ninguna nota coincide con "${query}".`;
+    return `Encontrado en ${results.length} nota(s):\n${results.join('\n')}`;
   },
 };

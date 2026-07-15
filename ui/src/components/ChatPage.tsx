@@ -36,9 +36,6 @@ interface ChatPageProps {
   connected?: boolean;
   notices?: Notice[];
   onDismissNotice?: (id: string) => void;
-  pushKey?: string;
-  onPushSubscribe?: (subscription: unknown) => void;
-  onPushUnsubscribe?: (endpoint: string) => void;
 }
 
 const SUGGESTIONS = [
@@ -63,16 +60,6 @@ function loadFolders(): FolderState {
     }
   } catch { /* ignore */ }
   return { folders: [], assign: {} };
-}
-
-// Clave VAPID base64url -> Uint8Array (formato que exige pushManager.subscribe)
-function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
-  const padding = '='.repeat((4 - (base64.length % 4)) % 4);
-  const b64 = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const raw = atob(b64);
-  const arr = new Uint8Array(new ArrayBuffer(raw.length));
-  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
-  return arr;
 }
 
 function timeAgo(iso: string): string {
@@ -103,7 +90,7 @@ function prettyConvTitle(title: string): string {
   return t;
 }
 
-export function ChatPage({ messages, onSend, streamingId, pendingConfirm, onConfirm, onClose, onNewChat, conversations, currentConvId, onSwitchChat, onDeleteChat, onRenameChat, onStopStream, toolActivities, onEditMessage, model, voice, folderState: serverFolderState, onFolderStateChange, onOpenModelConfig, connected = true, notices, onDismissNotice, pushKey, onPushSubscribe, onPushUnsubscribe }: ChatPageProps) {
+export function ChatPage({ messages, onSend, streamingId, pendingConfirm, onConfirm, onClose, onNewChat, conversations, currentConvId, onSwitchChat, onDeleteChat, onRenameChat, onStopStream, toolActivities, onEditMessage, model, voice, folderState: serverFolderState, onFolderStateChange, onOpenModelConfig, connected = true, notices, onDismissNotice }: ChatPageProps) {
   const [input, setInput] = useState('');
   const [search, setSearch] = useState('');
   // Móvil: rail siempre cerrado al abrir (drawer bajo demanda); desktop respeta localStorage
@@ -350,45 +337,6 @@ export function ChatPage({ messages, onSend, streamingId, pendingConfirm, onConf
   // Sheet de notificaciones (móvil)
   const [noticesOpen, setNoticesOpen] = useState(false);
   const activeNotices = (notices || []).filter(n => !n.dismissed);
-
-  // Push: notificaciones nativas (pestaña en background) + Web Push vía service
-  // worker (app cerrada; en iOS requiere la PWA instalada en pantalla de inicio)
-  const [webNotif, setWebNotif] = useState(() => localStorage.getItem('escarlata.webnotif') === '1');
-  const toggleWebNotif = async () => {
-    if (!webNotif) {
-      if (typeof Notification === 'undefined') return;
-      if (Notification.permission !== 'granted') {
-        const p = await Notification.requestPermission();
-        if (p !== 'granted') return;
-      }
-      // Suscripción Web Push (si hay SW + clave VAPID del servidor)
-      try {
-        if ('serviceWorker' in navigator && pushKey) {
-          const reg = await navigator.serviceWorker.ready;
-          const sub = await reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(pushKey),
-          });
-          onPushSubscribe?.(sub.toJSON());
-        }
-      } catch { /* sin push manager (http, navegador viejo): queda solo la notificación de pestaña */ }
-      localStorage.setItem('escarlata.webnotif', '1');
-      setWebNotif(true);
-    } else {
-      try {
-        if ('serviceWorker' in navigator) {
-          const reg = await navigator.serviceWorker.ready;
-          const sub = await reg.pushManager.getSubscription();
-          if (sub) {
-            onPushUnsubscribe?.(sub.endpoint);
-            await sub.unsubscribe();
-          }
-        }
-      } catch { /* ignore */ }
-      localStorage.setItem('escarlata.webnotif', '0');
-      setWebNotif(false);
-    }
-  };
 
   // --- Conversation row (shared by folders + recents) ---
   const convRow = (conv: Conversation) => (
@@ -817,14 +765,6 @@ export function ChatPage({ messages, onSend, streamingId, pendingConfirm, onConf
           <div className="chat-notice-sheet">
             <div className="chat-notice-sheet-head">
               <span className="chat-notice-sheet-title">NOTIFICACIONES · {activeNotices.length}</span>
-              <button
-                className="chat-mini-btn"
-                onClick={toggleWebNotif}
-                title="Notificaciones del navegador con la pestaña en background"
-                style={webNotif ? { color: 'var(--accent-bright)', borderColor: 'var(--accent-line)' } : undefined}
-              >
-                Push {webNotif ? 'ON' : 'OFF'}
-              </button>
               {activeNotices.length > 0 && onDismissNotice && (
                 <button className="chat-mini-btn" onClick={() => activeNotices.forEach(n => onDismissNotice(n.id))}>
                   Limpiar
