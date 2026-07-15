@@ -75,7 +75,7 @@ export default function App() {
   const [pushKey, setPushKey] = useState('');
   const [toolActivities, setToolActivities] = useState<ToolActivity[]>([]);
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({
-    provider: 'ollama', model: 'qwen2.5:7b',
+    provider: 'unconfigured', model: 'Conecta un proveedor',
     link: { ollama: false, whisper: false, ngrok: false },
     runner: 'standby', queue: 0,
   });
@@ -646,13 +646,8 @@ export default function App() {
   return (
     <DesktopWindowFrame><div className="app-container">
       <div className="mobile-logo">
-        <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: '0.25em', color: 'var(--accent-bright)', lineHeight: 1.2 }}>
-          E.S.C.A.R.L.A.T.A
-        </div>
-        <div style={{ fontSize: 8, letterSpacing: '0.12em', color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 2 }}>
-          ENTIDAD SINTÉTICA DE COMANDO AUTÓNOMO<br />
-          CON RAZONAMIENTO LÓGICO ASINCRÓNICO Y TOMA AUTÓNOMA DE DECISIONES
-        </div>
+        <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: '0.25em', color: 'var(--accent-bright)', lineHeight: 1.2 }}>E.S.C.A.R.L.A.T.A</div>
+        <div style={{ fontSize: 8, letterSpacing: '0.12em', color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 2 }}>ENTIDAD SINTÉTICA DE COMANDO AUTÓNOMO<br />CON RAZONAMIENTO LÓGICO ASINCRÓNICO Y TOMA AUTÓNOMA DE DECISIONES</div>
       </div>
       <div className="main-content">
         <ResizeHandle onResize={handleSidebarResize} />

@@ -15,8 +15,8 @@ self.addEventListener('push', (e) => {
     self.registration.showNotification(data.title || 'Escarlata', {
       body: data.body || '',
       tag: data.tag || undefined,
-      icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
+      icon: '/EscarlataAppIcon.png',
+      badge: '/EscarlataAppIcon.png',
     })
   );
 });

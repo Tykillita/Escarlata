@@ -16,10 +16,7 @@ function LogoLauncher({ onOpenChat, onOpenProviders, onOpenSync, onOpenActivity,
     <div ref={rootRef} className="logo-block logo-launcher">
       <button type="button" className="logo-launcher-trigger" onClick={() => setOpen(value => !value)} aria-label="Abrir navegación rápida" aria-expanded={open} aria-haspopup="menu">
         <span style={{ fontSize: 24, fontWeight: 600, letterSpacing: '0.25em', color: 'var(--accent-bright)' }}>E.S.C.A.R.L.A.T.A</span>
-        <span style={{ display: 'block', fontSize: 8, letterSpacing: '0.12em', color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.5 }}>
-          ENTIDAD SINTÉTICA DE COMANDO AUTÓNOMO<br />
-          CON RAZONAMIENTO LÓGICO ASINCRÓNICO Y TOMA AUTÓNOMA DE DECISIONES
-        </span>
+        <span style={{ display: 'block', fontSize: 8, letterSpacing: '0.12em', color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.5 }}>ENTIDAD SINTÉTICA DE COMANDO AUTÓNOMO<br />CON RAZONAMIENTO LÓGICO ASINCRÓNICO Y TOMA AUTÓNOMA DE DECISIONES</span>
       </button>
       {open && (
         <div className="logo-command-menu" role="menu" aria-label="Navegación rápida">

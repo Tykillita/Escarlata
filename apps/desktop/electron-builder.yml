@@ -6,12 +6,18 @@ files:
   - out/**
   - package.json
   - "!**/*.map"
+extraResources:
+  - from: ui/public/EscarlataAppIcon.ico
+    to: EscarlataAppIcon.ico
+  - from: ui/public/EscarlataTray.png
+    to: EscarlataTray.png
 asar: true
 asarUnpack:
   - node_modules/sql.js/dist/**
   - node_modules/@openai/codex-*/**
 win:
-  signAndEditExecutable: false
+  icon: ui/public/EscarlataAppIcon.ico
+  signAndEditExecutable: true
   target: [nsis, portable]
 nsis:
   oneClick: false
