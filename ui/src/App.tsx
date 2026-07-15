@@ -75,7 +75,7 @@ export default function App() {
   const [chatFolders, setChatFolders] = useState<ChatFolderState | null>(null);
   const [toolActivities, setToolActivities] = useState<ToolActivity[]>([]);
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({
-    provider: 'ollama', model: 'qwen2.5:7b',
+    provider: 'unconfigured', model: 'Conecta un proveedor',
     link: { ollama: false, whisper: false, ngrok: false },
     runner: 'standby', queue: 0,
   });

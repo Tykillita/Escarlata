@@ -1706,7 +1706,6 @@ body::after {
 /* Empty state móvil: starburst + saludo serif (estilo Claude iOS) */
 .chat-empty-logo {
   justify-content: center;
-  filter: drop-shadow(0 0 12px var(--accent-glow));
 }
 .chat-greeting {
   font-family: Georgia, 'Times New Roman', serif;
