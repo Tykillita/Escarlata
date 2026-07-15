@@ -1,7 +1,7 @@
 import { Tool, ToolRegistry } from '../tools/registry.js';
 import { registerAllTools } from '../tools/index.js';
 import { Agent, ConfirmationGate, SafetyRuleResolver, ToolEventCallback } from '../agent/core.js';
-import { Provider, Message } from '../provider/types.js';
+import { Provider } from '../provider/types.js';
 import { audit } from '../config/audit.js';
 import { SUBAGENT_PROFILES, ESCARLATA_DIRECT_TOOLS, getProfile, buildSubagentPrompt } from './profiles.js';
 
@@ -137,20 +137,6 @@ export function createEscarlataRegistry(opts: TeamOptions): ToolRegistry {
   }
   registry.register(createDelegateTool(master, opts));
   return registry;
-}
-
-/** Flatten agent history into a USUARIO/ESCARLATA transcript for analysis. */
-export function historyToTranscript(history: Message[]): string {
-  return history
-    .map(m => {
-      const text = typeof m.content === 'string'
-        ? m.content
-        : m.content.map(b => (b.type === 'text' && 'text' in b) ? b.text : '').filter(Boolean).join('\n');
-      if (!text.trim() || m.role === 'system') return '';
-      return `${m.role === 'user' ? 'USUARIO' : 'ESCARLATA'}: ${text.trim()}`;
-    })
-    .filter(Boolean)
-    .join('\n---\n');
 }
 
 export interface Team {

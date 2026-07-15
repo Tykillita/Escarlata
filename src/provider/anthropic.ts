@@ -5,7 +5,6 @@ import { ToolDefinition } from '../tools/registry.js';
 export class AnthropicProvider implements Provider {
   private client: Anthropic;
   private model: string;
-  private pendingToolResult: { id: string; name: string; input: Record<string, unknown> } | null = null;
 
   constructor(options: ProviderOptions) {
     this.client = new Anthropic({ apiKey: options.apiKey || '' });

@@ -8,8 +8,6 @@ export interface AuditEntry {
   metadata?: Record<string, unknown>;
 }
 
-const AUDIT_FILE = process.env.AUDIT_FILE || path.join(process.cwd(), 'data', 'audit.log');
-
 function getAuditPath(): string {
   return process.env.AUDIT_FILE || path.join(process.cwd(), 'data', 'audit.log');
 }

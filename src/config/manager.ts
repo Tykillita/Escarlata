@@ -21,8 +21,6 @@ export interface EscarlataConfig {
   authMethods: Record<string, AuthMethod>;
 }
 
-const CONFIG_FILE = process.env.CONFIG_FILE || path.join(process.cwd(), 'data', 'config.json');
-
 export function getConfigPath(): string {
   return process.env.CONFIG_FILE || path.join(process.cwd(), 'data', 'config.json');
 }

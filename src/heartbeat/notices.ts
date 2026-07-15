@@ -19,8 +19,6 @@ export interface Notice {
   actions?: NoticeAction[];
 }
 
-const NOTICES_FILE = process.env.NOTICES_FILE || path.join(process.cwd(), 'data', 'notices.json');
-
 function getNoticesPath(): string {
   return process.env.NOTICES_FILE || path.join(process.cwd(), 'data', 'notices.json');
 }
