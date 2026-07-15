@@ -72,7 +72,6 @@ export default function App() {
   const [currentConvId, setCurrentConvId] = useState<string>('');
   // null hasta que el servidor manda su estado — evita migrar/sobrescribir antes de tiempo
   const [chatFolders, setChatFolders] = useState<ChatFolderState | null>(null);
-  const [pushKey, setPushKey] = useState('');
   const [toolActivities, setToolActivities] = useState<ToolActivity[]>([]);
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({
     provider: 'ollama', model: 'qwen2.5:7b',
@@ -180,7 +179,6 @@ export default function App() {
       if (msg.conversations) setConversations(msg.conversations as Conversation[]);
       if (msg.currentConvId) setCurrentConvId(msg.currentConvId as string);
       if (msg.chatFolders) setChatFolders(msg.chatFolders as ChatFolderState);
-      if (msg.pushKey) setPushKey(msg.pushKey as string);
       if (msg.profile) setLocalProfile(msg.profile as typeof localProfile);
       if (msg.auth) setAuthState(msg.auth as typeof authState);
       if (msg.onboarding) setOnboarding(msg.onboarding as typeof onboarding);
@@ -613,9 +611,6 @@ export default function App() {
           connected={connected}
           notices={notices}
           onDismissNotice={(id) => send({ type: 'dismiss_notice', id })}
-          pushKey={pushKey}
-          onPushSubscribe={(subscription) => send({ type: 'push_subscribe', subscription })}
-          onPushUnsubscribe={(endpoint) => send({ type: 'push_unsubscribe', endpoint })}
         />
       </ErrorBoundary>
       {showModelConfig && (

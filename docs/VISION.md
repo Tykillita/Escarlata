@@ -1,5 +1,8 @@
 # Escarlata — Agent Spec
 
+> Visión/spec original del producto (antes `AGENT.md`). Describe la meta de diseño, no el
+> stack actual: la implementación real es Node/TypeScript + Electron (ver `CLAUDE.md`).
+
 ## Identity
 - **Name**: Escarlata
 - **Description**: Warm, casual voice-first AI assistant for personal + team use, built to scale
