@@ -16,6 +16,11 @@ let tray: Tray | null = null;
 let notificationService: DesktopNotificationService | null = null;
 let isQuitting = false;
 
+// Windows uses this identifier to associate toast notifications with Escarlata.
+// Without it, notifications launched from the development executable can be
+// discarded or grouped under Electron instead of appearing for this app.
+if (process.platform === 'win32') app.setAppUserModelId('com.escarlata.desktop');
+
 const emit = (event: Record<string, unknown>) => windowRef?.webContents.send('escarlata:event', event);
 setWindowsHelloWindowProvider(() => {
   try {
