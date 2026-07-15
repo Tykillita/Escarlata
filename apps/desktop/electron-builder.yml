@@ -1,0 +1,21 @@
+appId: com.escarlata.desktop
+productName: Escarlata
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+  - "!**/*.map"
+asar: true
+asarUnpack:
+  - node_modules/sql.js/dist/**
+  - node_modules/@openai/codex-*/**
+win:
+  signAndEditExecutable: false
+  target: [nsis, portable]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: Escarlata-Setup-${version}.${ext}
+portable:
+  artifactName: Escarlata-Portable-${version}.${ext}

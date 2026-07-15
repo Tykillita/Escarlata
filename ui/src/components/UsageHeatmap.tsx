@@ -1,0 +1,319 @@
+import { useMemo, useState } from 'react';
+import type { UsageStatsDay } from '../types';
+
+type Tab = 'overview' | 'models';
+type Range = 'all' | '30d' | '7d';
+
+const RANGE_DAYS: Record<Range, number> = { all: 182, '30d': 30, '7d': 7 };
+
+// Rough token counts of well-known works, for the fun comparison line.
+const WORKS: { name: string; tokens: number }[] = [
+  { name: 'a long tweet', tokens: 300 },
+  { name: 'The Little Prince', tokens: 22_000 },
+  { name: 'The Hobbit', tokens: 125_000 },
+  { name: 'Don Quijote', tokens: 550_000 },
+  { name: 'The Lord of the Rings', tokens: 750_000 },
+  { name: 'the Bible', tokens: 1_000_000 },
+  { name: 'the Harry Potter saga', tokens: 1_450_000 },
+  { name: 'the Encyclopædia Britannica', tokens: 60_000_000 },
+];
+
+function formatK(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(Math.round(n));
+}
+
+function localDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function shortModel(model: string): string {
+  return model
+    .replace(/^claude-/, '')
+    .replace(/-\d{8}$/, '')
+    .replace(/-/g, ' ')
+    .toUpperCase();
+}
+
+function dayTokens(d: UsageStatsDay): number {
+  return d.models.reduce((s, m) => s + m.input + m.output, 0);
+}
+
+function comparisonLine(total: number): string {
+  if (total <= 0) return 'No tokens yet — the page is blank.';
+  const candidates = WORKS.filter(w => w.tokens <= total);
+  if (candidates.length === 0) {
+    const pct = Math.max(1, Math.round((total / WORKS[0].tokens) * 100));
+    return `You've used ~${pct}% of ${WORKS[0].name} in tokens.`;
+  }
+  const work = candidates[candidates.length - 1];
+  const ratio = total / work.tokens;
+  const nice = ratio >= 10 ? Math.round(ratio) : Math.round(ratio * 2) / 2;
+  return `You've used ~${nice}× more tokens than ${work.name}.`;
+}
+
+function TabButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        background: 'transparent',
+        border: 'none',
+        padding: '2px 6px',
+        fontSize: 9,
+        letterSpacing: '0.1em',
+        cursor: 'pointer',
+        color: active ? 'var(--accent-bright)' : 'var(--text-muted)',
+        borderBottom: active ? '1px solid var(--accent-dim)' : '1px solid transparent',
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function StatCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ border: '1px solid var(--border-subtle)', padding: '2px 5px', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 4, overflow: 'hidden' }}>
+      <span className="label-sm" style={{ fontSize: 7, whiteSpace: 'nowrap' }}>{label}</span>
+      <span style={{ fontSize: 11, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</span>
+    </div>
+  );
+}
+
+function heatIntensity(tokens: number, activeValues: number[]): number {
+  if (tokens <= 0) return 0;
+  const distinct = [...new Set(activeValues)].sort((left, right) => left - right);
+  if (distinct.length <= 1) return 1;
+  const rank = Math.max(0, distinct.findIndex(value => value === tokens));
+  const position = rank / (distinct.length - 1);
+  // Rank-based spacing guarantees perceptible separation when the absolute
+  // token totals are clustered closely together.
+  return 0.1 + Math.pow(position, 1.15) * 0.9;
+}
+
+function Heatmap({ days, rangeDays }: { days: UsageStatsDay[]; rangeDays: number }) {
+  const byDate = new Map(days.map(d => [d.date, dayTokens(d)]));
+  const today = new Date();
+  const weeks = 26; // fixed grid; rangeDays only controls which cells are highlighted
+  // Columns of 7 cells (rows = weekday), ending in the week that contains today.
+  const end = new Date(today);
+  end.setDate(end.getDate() + (6 - end.getDay())); // Saturday of the current week
+  const totalCells = weeks * 7;
+  const cells: { date: string; tokens: number; inRange: boolean }[] = [];
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() - (rangeDays - 1));
+  for (let i = totalCells - 1; i >= 0; i--) {
+    const d = new Date(end);
+    d.setDate(d.getDate() - i);
+    const key = localDateStr(d);
+    cells.push({ date: key, tokens: byDate.get(key) ?? 0, inRange: d >= cutoff && d <= today });
+  }
+  const activeValues = cells.filter(cell => cell.inRange && cell.tokens > 0).map(cell => cell.tokens);
+  // Cells stretch to fill the panel width; height follows via aspect-ratio.
+  return (
+    <div style={{ display: 'grid', gridTemplateRows: 'repeat(7, auto)', gridAutoFlow: 'column', gridAutoColumns: '1fr', gap: 2, width: '100%', marginTop: 8 }}>
+      {cells.map(c => {
+        const intensity = c.inRange ? heatIntensity(c.tokens, activeValues) : 0;
+        const glow = intensity > 0.75 ? (intensity - 0.75) / 0.25 : 0;
+        const colorWeight = Math.round(intensity * 100);
+        return (
+          <div
+            key={c.date}
+            title={`${c.date} · ${formatK(c.tokens)} tokens`}
+            style={{
+              width: '100%',
+              aspectRatio: '1',
+              background: intensity > 0
+                ? `color-mix(in srgb, var(--accent-bright) ${colorWeight}%, #050508)`
+                : 'var(--border-subtle)',
+              opacity: intensity > 0 ? 1 : c.inRange ? 0.14 : 0.07,
+              boxShadow: glow > 0
+                ? `0 0 ${1 + glow * 4}px color-mix(in srgb, var(--accent-bright) ${Math.round(35 + glow * 50)}%, transparent)`
+                : 'none',
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+const MODEL_COLORS = ['var(--accent-bright)', 'var(--accent)', 'var(--accent-dim)'];
+
+function ModelsView({ days }: { days: UsageStatsDay[] }) {
+  const totals = new Map<string, { model: string; provider: 'anthropic' | 'openai'; input: number; output: number }>();
+  for (const d of days) {
+    for (const m of d.models) {
+      const key = `${m.provider}:${m.model}`;
+      const t = totals.get(key) ?? { model: m.model, provider: m.provider, input: 0, output: 0 };
+      t.input += m.input;
+      t.output += m.output;
+      totals.set(key, t);
+    }
+  }
+  const ranked = [...totals.entries()]
+    .map(([key, t]) => ({ key, ...t, total: t.input + t.output }))
+    .sort((a, b) => b.total - a.total);
+  const grandTotal = ranked.reduce((s, m) => s + m.total, 0);
+  if (grandTotal === 0) return <div className="label-sm" style={{ padding: '10px 0' }}>NO MODEL DATA IN RANGE</div>;
+  const colorOf = (provider: string, model: string) => {
+    const idx = ranked.findIndex(r => r.key === `${provider}:${model}`);
+    return MODEL_COLORS[Math.min(idx, MODEL_COLORS.length - 1)];
+  };
+
+  const w = 280; const h = 100;
+  const barW = Math.max(3, Math.min(18, Math.floor(w / Math.max(days.length, 1)) - 2));
+  const maxDay = Math.max(...days.map(dayTokens), 1);
+  return (
+    <div>
+      <svg width={w} height={h + 14} style={{ display: 'block', marginTop: 8 }}>
+        {days.map((d, i) => {
+          const x = i * (barW + 2);
+          let y = h;
+          return d.models.map(m => {
+            const seg = ((m.input + m.output) / maxDay) * h;
+            y -= seg;
+            return <rect key={`${d.date}-${m.provider}-${m.model}`} x={x} y={y} width={barW} height={seg} fill={colorOf(m.provider, m.model)} opacity={0.85} />;
+          });
+        })}
+        {days.length > 0 && (
+          <>
+            <text x={0} y={h + 11} fontSize={8} fill="var(--text-muted)" letterSpacing="0.1em">{days[0].date.slice(5)}</text>
+            <text x={w} y={h + 11} fontSize={8} fill="var(--text-muted)" letterSpacing="0.1em" textAnchor="end">{days[days.length - 1].date.slice(5)}</text>
+          </>
+        )}
+      </svg>
+      <div style={{ marginTop: 8 }}>
+        {ranked.map(m => (
+          <div key={m.key} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 10 }}>
+            <span style={{ width: 7, height: 7, background: colorOf(m.provider, m.model), flexShrink: 0 }} />
+            <span className="label-sm" style={{ fontSize: 6.5, color: m.provider === 'openai' ? 'var(--accent-text)' : 'var(--text-muted)' }}>
+              {m.provider === 'openai' ? 'GPT' : 'CLAUDE'}
+            </span>
+            <span style={{ color: 'var(--text-primary)', letterSpacing: '0.05em', flexShrink: 0 }}>{shortModel(m.model)}</span>
+            <span style={{ color: 'var(--text-muted)', marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+              {formatK(m.input)} in · {formatK(m.output)} out
+            </span>
+            <span style={{ color: 'var(--text-secondary)', width: 38, textAlign: 'right', flexShrink: 0 }}>
+              {((m.total / grandTotal) * 100).toFixed(1)}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function UsageHeatmap({ days }: { days: UsageStatsDay[] }) {
+  const [tab, setTab] = useState<Tab>('overview');
+  const [range, setRange] = useState<Range>('all');
+
+  const filtered = useMemo(() => {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - (RANGE_DAYS[range] - 1));
+    const cutoffStr = localDateStr(cutoff);
+    return days.filter(d => range === 'all' || d.date >= cutoffStr);
+  }, [days, range]);
+
+  const stats = useMemo(() => {
+    const sessions = new Set<string>();
+    let messages = 0;
+    let tokens = 0;
+    const hourTotals = new Array(24).fill(0);
+    const modelTotals = new Map<string, { model: string; provider: 'anthropic' | 'openai'; tokens: number }>();
+    for (const d of filtered) {
+      d.sessionIds.forEach(s => sessions.add(s));
+      messages += d.messages;
+      tokens += dayTokens(d);
+      d.hourCounts.forEach((c, h) => { hourTotals[h] += c; });
+      for (const m of d.models) {
+        const key = `${m.provider}:${m.model}`;
+        const total = modelTotals.get(key) ?? { model: m.model, provider: m.provider, tokens: 0 };
+        total.tokens += m.input + m.output;
+        modelTotals.set(key, total);
+      }
+    }
+    // Streaks over the filtered set of active dates
+    const active = new Set(filtered.filter(d => d.messages > 0).map(d => d.date));
+    let longest = 0;
+    for (const date of active) {
+      const prev = new Date(date);
+      prev.setDate(prev.getDate() - 1);
+      if (active.has(localDateStr(prev))) continue; // not a streak start
+      let len = 1;
+      const cur = new Date(date);
+      for (;;) {
+        cur.setDate(cur.getDate() + 1);
+        if (!active.has(localDateStr(cur))) break;
+        len++;
+      }
+      longest = Math.max(longest, len);
+    }
+    let current = 0;
+    const cursor = new Date();
+    if (!active.has(localDateStr(cursor))) cursor.setDate(cursor.getDate() - 1); // today may not have started yet
+    while (active.has(localDateStr(cursor))) {
+      current++;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    const peakIdx = hourTotals.indexOf(Math.max(...hourTotals));
+    const peakHour = hourTotals[peakIdx] > 0 ? `${peakIdx % 12 || 12} ${peakIdx >= 12 ? 'PM' : 'AM'}` : '—';
+    const favorite = [...modelTotals.values()].sort((a, b) => b.tokens - a.tokens)[0];
+    return {
+      sessions: sessions.size,
+      messages,
+      tokens,
+      activeDays: active.size,
+      currentStreak: current,
+      longestStreak: longest,
+      peakHour,
+      favorite: favorite ? `${favorite.provider === 'openai' ? 'GPT' : 'CLAUDE'} · ${shortModel(favorite.model)}` : '—',
+    };
+  }, [filtered]);
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span className="label">USAGE MATRIX</span>
+        <span className="label-sm">CLAUDE+GPT.LOCAL</span>
+        <span style={{ marginLeft: 'auto', display: 'flex' }}>
+          {(['all', '30d', '7d'] as Range[]).map(r => (
+            <TabButton key={r} active={range === r} label={r.toUpperCase()} onClick={() => setRange(r)} />
+          ))}
+        </span>
+      </div>
+      <div className="separator" />
+      <div style={{ display: 'flex', marginBottom: 6 }}>
+        <TabButton active={tab === 'overview'} label="OVERVIEW" onClick={() => setTab('overview')} />
+        <TabButton active={tab === 'models'} label="MODELS" onClick={() => setTab('models')} />
+      </div>
+      {days.length === 0 ? (
+        <div className="label-sm" style={{ padding: '10px 0' }}>NO LOCAL DATA</div>
+      ) : tab === 'overview' ? (
+        <div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+            <StatCell label="SESSIONS" value={String(stats.sessions)} />
+            <StatCell label="MESSAGES" value={String(stats.messages)} />
+            <StatCell label="TOKENS" value={formatK(stats.tokens)} />
+            <StatCell label="ACTIVE DAYS" value={String(stats.activeDays)} />
+            <StatCell label="STREAK" value={`${stats.currentStreak}d`} />
+            <StatCell label="LONGEST" value={`${stats.longestStreak}d`} />
+            <StatCell label="PEAK HOUR" value={stats.peakHour} />
+            <StatCell label="FAV MODEL" value={stats.favorite} />
+          </div>
+          <Heatmap days={days} rangeDays={RANGE_DAYS[range]} />
+          <div className="label-sm" style={{ marginTop: 8, letterSpacing: '0.08em' }}>
+            {comparisonLine(stats.tokens)}
+          </div>
+        </div>
+      ) : (
+        <ModelsView days={filtered} />
+      )}
+    </div>
+  );
+}

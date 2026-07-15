@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function owner(uid) { return request.auth != null && request.auth.uid == uid; }
+    function safeKeys() {
+      return !request.resource.data.keys().hasAny([
+        'apiKey', 'apiKeys', 'token', 'accessToken', 'refreshToken',
+        'serviceAccount', 'providerConfig', 'localPath', 'modelPath'
+      ]);
+    }
+    match /users/{uid}/{document=**} {
+      allow read: if owner(uid);
+      allow create, update: if owner(uid) && safeKeys();
+      allow delete: if owner(uid);
+    }
+  }
+}
