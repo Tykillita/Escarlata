@@ -483,18 +483,22 @@ export default function App() {
     send({ type: 'set_chat_folders', folders: next.folders, assign: next.assign });
   }, [send]);
 
-  const handleEditMessage = useCallback((_messageId: string, _newContent: string) => {
-    // Update the message locally and send to server
+  const handleEditMessage = useCallback((messageId: string, newContent: string) => {
+    const idx = messages.findIndex(m => m.id === messageId);
+    if (idx === -1) return;
+    // Ordinal del mensaje entre los turnos de usuario: es lo único que el
+    // backend puede mapear a su historial (los ids del renderer son locales).
+    const userIndex = messages.slice(0, idx).filter(m => m.role === 'user' && m.content.trim()).length;
+    // Truncado optimista local; el backend re-genera desde ese punto.
     setMessages(prev => {
-      const idx = prev.findIndex(m => m.id === _messageId);
-      if (idx === -1) return prev;
-      const updated = prev.slice(0, idx);
-      // Remove all messages after the edited one (the assistant response)
+      const cut = prev.findIndex(m => m.id === messageId);
+      if (cut === -1) return prev;
+      const updated = prev.slice(0, cut);
       setStreamingId(`stream-${Date.now()}`);
       updated.push({
         id: `msg-${Date.now()}`,
         role: 'user',
-        content: _newContent,
+        content: newContent,
         timestamp: new Date().toISOString(),
       });
       updated.push({
@@ -506,8 +510,8 @@ export default function App() {
       });
       return updated;
     });
-    send({ type: 'edit_message', messageId: _messageId, content: _newContent });
-  }, [send]);
+    send({ type: 'edit_message', userIndex, content: newContent });
+  }, [messages, send]);
 
   const handleSetProvider = useCallback((provider: string, model: string, authMethod: AuthMethod, apiKey?: string) => {
     send({ type: 'set_provider', provider, model, authMethod, apiKey });

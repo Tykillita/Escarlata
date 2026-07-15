@@ -175,7 +175,7 @@ export class DesktopAgentService {
   }
   private cachedTelemetry(provider:VitalsProvider):TelemetryCache|undefined{return this.store.setting<TelemetryCache>(`telemetry:${provider}`);}
   private cachedUsageStats():UsageStatsCache|undefined{return this.store.setting<UsageStatsCache>('usageStatsCache');}
-  private async sendState():Promise<void>{const config=getConfigManager().get();const auth={...this.localAuth.status(),windowsHelloAvailable:false,unlocked:this.unlocked};const anthropicCache=this.cachedTelemetry('anthropic');const openAICache=this.cachedTelemetry('openai');const statsCache=this.cachedUsageStats();this.emit({type:'auth_ok'});this.emit({type:'state',desktop:true,profile:this.store.profile(),auth,onboarding:this.store.setting('onboarding')||{completed:false},defaultVaultDirectory:process.env.DEFAULT_VAULT_DIR||'vault',modelsDir:this.modelsDirectory(),history:this.agent.getHistory(),tools:this.agent.getToolDefinitions(),config:{...config,apiKeys:{}},facts:await getMemoryStore().getAll(),memoryCandidates:this.store.listMemoryCandidates(),conversations:this.store.listConversations(),currentConvId:this.conversationId,vitalsByProvider:{anthropic:anthropicCache?.metrics||null,openai:openAICache?.metrics||null},telemetryCache:{anthropic:anthropicCache?.updatedAt,openai:openAICache?.updatedAt},usageStats:statsCache?.days||[]});void windowsHelloAvailable().then(available=>this.emit({type:'auth_state',...this.localAuth.status(),windowsHelloAvailable:available,unlocked:this.unlocked}));}
+  private async sendState():Promise<void>{const config=getConfigManager().get();const auth={...this.localAuth.status(),windowsHelloAvailable:false,unlocked:this.unlocked};const anthropicCache=this.cachedTelemetry('anthropic');const openAICache=this.cachedTelemetry('openai');const statsCache=this.cachedUsageStats();this.emit({type:'auth_ok'});this.emit({type:'state',desktop:true,profile:this.store.profile(),auth,onboarding:this.store.setting('onboarding')||{completed:false},defaultVaultDirectory:process.env.DEFAULT_VAULT_DIR||'vault',modelsDir:this.modelsDirectory(),history:this.agent.getHistory(),tools:this.agent.getToolDefinitions(),config:{...config,apiKeys:{}},facts:await getMemoryStore().getAll(),memoryCandidates:this.store.listMemoryCandidates(),conversations:this.store.listConversations(),currentConvId:this.conversationId,chatFolders:this.store.setting('chatFolders')||{folders:[],assign:{}},vitalsByProvider:{anthropic:anthropicCache?.metrics||null,openai:openAICache?.metrics||null},telemetryCache:{anthropic:anthropicCache?.updatedAt,openai:openAICache?.updatedAt},usageStats:statsCache?.days||[]});void windowsHelloAvailable().then(available=>this.emit({type:'auth_state',...this.localAuth.status(),windowsHelloAvailable:available,unlocked:this.unlocked}));}
   private async emitNotices(): Promise<void> { this.emit({ type: 'notices', active: await this.noticeBoard.getActive(), all: await this.noticeBoard.getAll() }); }
   private emitMemoryCandidates(): void { this.emit({ type: 'memory_candidates', candidates: this.store.listMemoryCandidates() }); }
   /** Análisis Amatista en background sobre la conversación al abandonarla (cambio de chat, chat nuevo, cierre). */
@@ -264,6 +264,23 @@ export class DesktopAgentService {
     case 'delete_conversation':this.store.deleteConversation(command.id);if(command.id===this.conversationId){this.conversationId=randomUUID();this.agent.clearHistory();}this.emit({type:'conversations',list:this.store.listConversations(),currentConvId:this.conversationId});return;
     case 'rename_conversation':this.store.renameConversation(command.id,command.title);this.emit({type:'conversations',list:this.store.listConversations(),currentConvId:this.conversationId});return;
     case 'clear_history':this.agent.clearHistory();this.store.saveConversation(this.conversationId,[]);this.emit({type:'history_cleared'});return;
+    case 'edit_message':{
+      if(this.active){this.emit({type:'error',code:'TURN_ACTIVE',message:'Espera a que termine la respuesta en curso antes de editar.'});return;}
+      const history=this.agent.getHistory();
+      // El userIndex cuenta solo inicios de turno del usuario (content string);
+      // los tool_result también llegan con role user pero como bloques.
+      let seen=0,cut=-1;
+      for(let i=0;i<history.length;i++){const m=history[i];if(m.role==='user'&&typeof m.content==='string'){if(seen===command.userIndex){cut=i;break;}seen++;}}
+      if(cut===-1){this.emit({type:'error',code:'EDIT_TARGET_NOT_FOUND',message:'No encontré el mensaje a editar. Recarga la conversación.'});return;}
+      this.agent.restoreHistory(history.slice(0,cut));
+      this.store.saveConversation(this.conversationId,this.agent.getHistory());
+      return this.runTurn(command.content);
+    }
+    case 'set_chat_folders':{
+      const folders={folders:command.folders,assign:command.assign};
+      this.store.setSetting('chatFolders',folders);
+      this.emit({type:'chat_folders',...folders});return;
+    }
     case 'get_memories':this.emit({type:'memories',facts:await getMemoryStore().getAll()});return;
     case 'get_vault_files':return this.refreshWorkspaceState();
     case 'get_directives':this.emit({type:'directives',items:await readDirectives()});return;

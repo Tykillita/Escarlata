@@ -16,7 +16,9 @@ export const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('delete_memory'), id }), z.object({ type: z.literal('dismiss_notice'), id }),
   z.object({ type: z.literal('get_memory_candidates') }),
   z.object({ type: z.literal('review_memory_candidate'), id, decision: z.enum(['approved', 'rejected']) }),
-  z.object({ type: z.literal('edit_message'), messageId: id, content: z.string().trim().min(1).max(32_000) }),
+  // userIndex: ordinal (base 0) del mensaje entre los mensajes de usuario de la
+  // conversación — los ids del renderer son locales y el backend no los conoce.
+  z.object({ type: z.literal('edit_message'), userIndex: z.number().int().min(0).max(100_000), content: z.string().trim().min(1).max(32_000) }),
   z.object({ type: z.literal('set_heartbeat'), paused: z.boolean() }),
   z.object({ type: z.literal('scan_models_dir'), directory: z.string().min(1).max(1_024) }),
   z.object({ type: z.literal('set_models_dir'), directory: z.string().max(1_024) }),
