@@ -69,9 +69,20 @@
 .app-settings-search input { width:100%; border:0; outline:0; background:transparent; color:var(--text-primary); font:inherit; font-size:12px; }
 .app-settings-group { margin:19px 8px 6px; color:var(--text-muted); font-size:8px; font-weight:700; letter-spacing:.15em; text-transform:uppercase; }
 .app-settings-empty { margin:18px 8px; color:var(--text-muted); font:11px/1.5 var(--font-sans); }
-.app-settings-row select { padding:6px 8px; border:1px solid rgba(255,255,255,.12); border-radius:6px; background:rgba(0,0,0,.3); color:var(--text-primary); font:11px var(--font-sans); cursor:pointer; }
-.app-settings-row select:focus { outline:none; border-color:var(--accent); }
 .app-settings-hours { display:inline-flex; align-items:center; gap:8px; color:var(--text-muted); font:11px var(--font-sans); }
+.app-settings-toggle { position:relative; width:34px; height:19px; flex:none; border-radius:10px; border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.07); cursor:pointer; transition:background .18s,border-color .18s; }
+.app-settings-toggle::after { content:''; position:absolute; top:2px; left:2px; width:13px; height:13px; border-radius:50%; background:var(--text-secondary); transition:transform .18s,background .18s; }
+.app-settings-toggle.on { border-color:var(--accent); background:var(--accent-glow); }
+.app-settings-toggle.on::after { transform:translateX(15px); background:var(--accent-bright); }
+.app-settings-toggle:disabled { opacity:.35; cursor:default; }
+.app-settings-toggle:focus-visible { outline:1px solid var(--accent-bright); outline-offset:2px; }
+.app-settings-select { position:relative; }
+.app-settings-select>button { display:flex; align-items:center; gap:6px; padding:7px 10px; border:1px solid rgba(255,255,255,.12); border-radius:7px; background:rgba(0,0,0,.28); color:var(--text-primary); font:11px var(--font-sans); cursor:pointer; }
+.app-settings-select>button:hover,.app-settings-select>button[aria-expanded=true] { border-color:var(--accent-line); color:var(--accent-bright); }
+.app-settings-select-menu { position:absolute; right:0; top:calc(100% + 5px); z-index:40; min-width:100%; max-height:230px; overflow:auto; padding:4px; border:1px solid color-mix(in srgb,var(--accent-line) 70%,rgba(255,255,255,.14)); border-radius:9px; background:#14151b; box-shadow:0 18px 48px rgba(0,0,0,.55); display:grid; gap:1px; }
+.app-settings-select-menu button { display:block; width:100%; padding:7px 12px; border:0; border-radius:6px; background:transparent; color:var(--text-secondary); font:11px var(--font-sans); text-align:left; cursor:pointer; white-space:nowrap; }
+.app-settings-select-menu button:hover { background:rgba(255,255,255,.06); color:var(--text-primary); }
+.app-settings-select-menu button.selected { background:var(--accent-glow); color:var(--accent-bright); }
 .app-settings-nav button { width:100%; display:flex; align-items:center; gap:10px; padding:8px 9px; border:0; border-radius:7px; background:transparent; color:var(--text-secondary); text-align:left; font:500 12px var(--font-sans); cursor:pointer; }
 .app-settings-nav button:hover { color:var(--text-primary); background:rgba(255,255,255,.045); }.app-settings-nav button.active { color:var(--text-primary); background:linear-gradient(90deg,var(--accent-glow),rgba(255,255,255,.07)); box-shadow:inset 2px 0 var(--accent-bright); }
 .app-settings-main { min-width:0; overflow:auto; padding:30px 34px 42px; background:radial-gradient(700px 430px at 100% 0,var(--accent-glow),transparent 65%),#15161b; }
